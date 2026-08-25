@@ -1,64 +1,130 @@
-#' Parse simple TreePPL json SMC output
+#' Parse TreePPL SMC output into a tidy data frame
 #'
-#' @description
-#' `tp_parse_smc` takes TreePPL json SMC output and returns a data.frame
+#' Converts a list of parsed SMC sweeps (from \code{tp_run()}) into a
+#' single tidy tibble of particles, their samples, and normalized weights.
+#' The function internally removes sweeps with an undefined normalizing constant.
 #'
-#' @param treeppl_out a character vector giving the TreePPL json output
-#' produced by [tp_run] using an SMC method.
+#' @param treeppl_out A list of sweeps parsed from a SMC JSON output: i.e.,
+#' the output object of \code{tp_run()}.
 #'
-#' @details
-#' Particles with -Inf weight are removed.
+#' @return A tibble with one row per particle, containing:
+#'   \describe{
+#'     \item{sweep}{Sweep index.}
+#'     \item{parameter}{Parameter name, if present in the input JSON.}
+#'     \item{samples}{Sampled value.}
+#'     \item{log_weight}{Log weight of the particle.}
+#'     \item{norm_constant}{Log normalizing constant for the sweep.}
+#'     \item{norm_weight}{Normalized weight, rescaled so the maximum
+#'       total log weight across all particles is 1.}
+#'   }
 #'
+#' @examples
+#' \dontrun{
+#' # Fit a quick CRBD model:
+#' path_data <- tp_data(data_input = "crbd")
+#' sampler_smc <- tp_compile(
+#'   model = "crbd",
+#'   method = "smc-apf",
+#'   sweeps = 2,
+#'   particles = 10
+#' )
+#' mod_smc <- tp_run(sampler = sampler_smc, data = path_data)
 #'
-#' @return A data frame with the output from inference in TreePPL.
+#' tp_parse_smc(mod_smc)
+#' }
+#'
 #' @export
 tp_parse_smc <- function(treeppl_out) {
-
-  result_df <- list()
-
-  for (i in seq_along(treeppl_out)) {
-
+  parse_sweep <- function(sweep, sweep_id) {
     # remove sweeps with nan norm const
-    if (treeppl_out[[i]]$normConst == "nan"){
-      print("Removing sweep without normalizing constant")
-    } else {
+    if (identical(sweep$normConst, "nan")) {
+      message("Removing sweep without normalizing constant (sweep ", sweep_id, ")")
+      return(NULL)
+    }
 
-      samples_c <- unlist(treeppl_out[[i]]$samples)
-      log_weight_c <- unlist(treeppl_out[[i]]$weights)
+    # sanity check to detect mismatches in the number of samples & weights
+    if (length(sweep$samples) != length(sweep$weights)) {
+      stop(
+        "Sweep ", sweep_id, ": samples (n=", length(sweep$samples),
+        ") and weights (n=", length(sweep$weights), ") have different lengths."
+      )
+    }
 
-      if(is.null(names(samples_c))){
-        result_df <- rbind(result_df,
-                           data.frame(sweep = i,
-                                      samples = samples_c,
-                                      log_weight = log_weight_c,
-                                      norm_constant = treeppl_out[[i]]$normConst)
+    norm_const <- sweep$normConst
+
+    # convert weight lists to numeric vectors, considering that some weights in the list
+    # may not be numeric, e.g., {"__float__": "-inf"}
+    log_weights <- purrr::map_dbl(sweep$weights, function(w) {
+      if (is.list(w) && !is.null(w[["__float__"]])) {
+        # use R convention for "nan" and "inf" (i.e., NaN, Inf, -Inf)
+        val <- tolower(as.character(w[["__float__"]]))
+        dplyr::case_when(
+          val == "-inf" ~ -Inf,
+          val == "inf" ~ Inf,
+          val == "nan" ~ NaN,
+          TRUE ~ as.numeric(val)
         )
       } else {
-        result_df <- rbind(result_df,
-                           data.frame(sweep = i,
-                                      parameter = names(samples_c),
-                                      samples = samples_c,
-                                      log_weight = log_weight_c,
-                                      norm_constant = treeppl_out[[i]]$normConst)
-        )
+        as.numeric(w)
       }
+    })
+
+    samples <- sweep$samples
+
+    has_parameter_names <- is.list(samples[[1]]) && !is.null(samples[[1]][["__data__"]])
+
+    # if the json has parameter names
+    if (has_parameter_names) {
+      samples_df <- purrr::imap_dfr(samples, function(s, particle_id) {
+        param_values <- s[["__data__"]]
+        tibble::tibble(
+          particle = particle_id,
+          parameter = names(param_values),
+          samples = as.numeric(unlist(param_values))
+        )
+      })
+    } else {
+      samples_df <- purrr::imap_dfr(samples, function(s, particle_id) {
+        tibble::tibble(
+          particle = particle_id,
+          samples = as.numeric(unlist(s))
+        )
+      })
     }
+
+    # here we create indexes for the particles so that we can use them to
+    # match weights with samples using left_join()
+    weights_df <- tibble::tibble(
+      particle = seq_along(log_weights),
+      log_weight = log_weights
+    )
+
+    # left_join() ensures the correct alignment of samples with their weights
+    samples_df |>
+      dplyr::left_join(weights_df, by = "particle") |>
+      dplyr::mutate(
+        sweep = sweep_id,
+        norm_constant = norm_const
+      ) |>
+      dplyr::select(-"particle")
   }
 
-  # check if all sweeps were removed
-  if (length(result_df) == 0) {
+  # parse sweeps one at time and rbind the results
+  result_df <- purrr::imap_dfr(treeppl_out, parse_sweep)
+
+  if (nrow(result_df) == 0) {
     stop("All sweeps failed")
-  } else{
-
-    result_df <- result_df |>
-      # remove particles with -Inf weight
-      dplyr::mutate(log_weight = as.numeric(.data$log_weight)) |>
-      dplyr::filter(!is.infinite(.data$log_weight)) |>
-      dplyr::mutate(total_lweight = .data$log_weight + .data$norm_constant) |>
-      dplyr::mutate(norm_weight = exp(.data$total_lweight - max(.data$total_lweight))) |>
-      dplyr::select(-"total_lweight")
   }
-  return(result_df)
+
+  # calculate the normalized weight and return
+  result_df |>
+    dplyr::filter(!is.infinite(.data$log_weight)) |>
+    dplyr::mutate(
+      total_lweight = .data$log_weight + .data$norm_constant,
+      norm_weight = exp(.data$total_lweight - max(.data$total_lweight))
+    ) |>
+    dplyr::select(-"total_lweight") |>
+    dplyr::relocate("sweep")
 }
 
 #' Parse simple TreePPL json MCMC output
@@ -72,23 +138,27 @@ tp_parse_smc <- function(treeppl_out) {
 #' @return A data frame with the output from inference in TreePPL.
 #' @export
 tp_parse_mcmc <- function(treeppl_out) {
-
   result_df <- list()
 
   for (i in seq_along(treeppl_out)) {
-
     samples_c <- unlist(treeppl_out[[i]]$samples)
 
-    if(is.null(names(samples_c))){
-      result_df <- rbind(result_df,
-                         data.frame(run = i,
-                                    samples = samples_c)
+    if (is.null(names(samples_c))) {
+      result_df <- rbind(
+        result_df,
+        data.frame(
+          run = i,
+          samples = samples_c
+        )
       )
     } else {
-      result_df <- rbind(result_df,
-                         data.frame(run = i,
-                                    parameter = names(samples_c),
-                                    samples = samples_c)
+      result_df <- rbind(
+        result_df,
+        data.frame(
+          run = i,
+          parameter = names(samples_c),
+          samples = samples_c
+        )
       )
     }
   }
@@ -111,7 +181,6 @@ tp_parse_mcmc <- function(treeppl_out) {
 #' @export
 
 tp_parse_host_rep <- function(treeppl_out) {
-
   result_list <- list()
 
   for (index in seq_along(treeppl_out)) {
@@ -145,7 +214,7 @@ tp_parse_host_rep <- function(treeppl_out) {
       "child2_index"
     )
 
-    #for (i in seq_along(output_trppl[1][[1]])) {
+    # for (i in seq_along(output_trppl[1][[1]])) {
     for (i in seq_along(output_trppl$samples)) {
       res <- data.frame(matrix(ncol = nbr_col, nrow = 0))
       colnames(res) <- c(
@@ -194,18 +263,18 @@ tp_parse_host_rep <- function(treeppl_out) {
   return(result_list)
 }
 
-#Recursive function to go deep in the tree
+# Recursive function to go deep in the tree
 peel_tree <- function(subtree,
-                       index,
-                       pindex,
-                       lweight,
-                       lnorm_const,
-                       mu,
-                       beta,
-                       lambda,
-                       prev_age,
-                       start_state,
-                       result) {
+                      index,
+                      pindex,
+                      lweight,
+                      lnorm_const,
+                      mu,
+                      beta,
+                      lambda,
+                      prev_age,
+                      start_state,
+                      result) {
   base <- c(
     iteration = as.numeric(index - 1),
     log_weight = as.numeric(lweight),
@@ -227,28 +296,29 @@ peel_tree <- function(subtree,
   if (!is.null(subtree$left)) {
     base[["child1_index"]] <-
       as.numeric(subtree$left$`__data__`$label - 1)
-    base[["child2_index"]]  <-
+    base[["child2_index"]] <-
       as.numeric(subtree$right$`__data__`$label - 1)
   }
 
-  base[["end_state"]]  <- base[["start_state"]]
+  base[["end_state"]] <- base[["start_state"]]
 
   chang_nbr <- length(subtree$history)
   if (chang_nbr != 0) {
     df <- data.frame(matrix(ncol = 2, nrow = chang_nbr))
     for (i in 1:chang_nbr) {
-      #"end_state"
+      # "end_state"
       df[i, 1] <-
         as.numeric(paste(subtree$history[[i]]$`__data__`$repertoire,
-                         collapse = ""))
-      #"transition_time"
+          collapse = ""
+        ))
+      # "transition_time"
       df[i, 2] <- as.numeric(subtree$history[[i]]$`__data__`$age)
     }
     df <- df[order(-df$X2), ]
     for (j in 1:chang_nbr) {
-      base[["start_state"]]  <- base[["end_state"]]
-      base[["end_state"]]  <- df[j, 1]
-      base[["transition_time"]]  <- df[j, 2]
+      base[["start_state"]] <- base[["end_state"]]
+      base[["end_state"]] <- df[j, 1]
+      base[["transition_time"]] <- df[j, 2]
       result[nrow(result) + 1, ] <- base
     }
   } else {
@@ -295,7 +365,6 @@ peel_tree <- function(subtree,
 #' @export
 #'
 tp_smc_convergence <- function(treeppl_out) {
-
   zs <- treeppl_out |>
     dplyr::slice_head(n = 1, by = .data$sweep) |>
     dplyr::pull(.data$norm_constant)
@@ -311,11 +380,9 @@ tp_smc_convergence <- function(treeppl_out) {
 #' @returns Gelman and Rubin's convergence diagnostic
 #'
 tp_mcmc_convergence <- function(treeppl_out) {
-
   # create coda::mcmc objects for each run
   # list(mcmc objects)
-  #coda::gelman.diag
-
+  # coda::gelman.diag
 }
 
 
@@ -328,7 +395,6 @@ tp_mcmc_convergence <- function(treeppl_out) {
 #' @export
 #'
 tp_map_tree <- function(trees_out) {
-
   trees <- trees_out$trees
   weights <- trees_out$weights
 
@@ -342,9 +408,8 @@ tp_map_tree <- function(trees_out) {
 
   # Identify unique topologies
   trees_ready <- lapply(trees, function(tree) {
-
     # normalize edge lengths for the tip reordering
-    tree$edge.length <- tree$edge.length/max(tree$edge.length)
+    tree$edge.length <- tree$edge.length / max(tree$edge.length)
     # Ladderize to fix edge indices
     tree_lad <- ladderize_tree(tree)
     # Order tip labels as similarly as possible
@@ -352,14 +417,13 @@ tp_map_tree <- function(trees_out) {
     # Remove edge lengths to only focus on topology
     tree_ord$edge.length <- NULL
     return(tree_ord)
-
   })
 
   # This compresses the list into unique tree topologies
   unique_topologies <- ape::unique.multiPhylo(trees_ready, use.edge.length = FALSE)
 
   # Map every original tree to a unique topology index
-  #match_indices <- match(trees_ready, unique_topologies)
+  # match_indices <- match(trees_ready, unique_topologies)
   match_indices <- attr(unique_topologies, "old.index")
 
   # Sum weights for each unique topology
@@ -375,20 +439,23 @@ tp_map_tree <- function(trees_out) {
   # Compute Mean Branch Lengths for the MAP Topology
   # We take all samples that matched the MAP topology...
   matching_indices <- which(match_indices == best_index)
-  matching_trees   <- trees[matching_indices]
+  matching_trees <- trees[matching_indices]
   matching_weights <- weights[matching_indices]
 
   # ...and compute a consensus to average their branch lengths.
   # Ideally, we should do a weighted average of the lengths,
   # but ape::consensus uses simple mean. For most purposes, this is sufficient.
-  final_map <- map <- phangorn::allCompat(matching_trees, rooted=TRUE) |>
+  final_map <- map <- phangorn::allCompat(matching_trees, rooted = TRUE) |>
     phangorn::add_edge_length(matching_trees,
-                              fun = function(x) stats::weighted.mean(x, matching_weights))
+      fun = function(x) stats::weighted.mean(x, matching_weights)
+    )
 
   print(paste("MAP Topology found"))
   print(paste("Posterior Probability:", round(map_prob, 4)))
-  print(paste("Based on the topology of", length(matching_indices),
-              "samples out of", length(trees)))
+  print(paste(
+    "Based on the topology of", length(matching_indices),
+    "samples out of", length(trees)
+  ))
 
   return(final_map)
 }

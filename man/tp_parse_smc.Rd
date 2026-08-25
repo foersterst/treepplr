@@ -2,20 +2,44 @@
 % Please edit documentation in R/post_treatment.R
 \name{tp_parse_smc}
 \alias{tp_parse_smc}
-\title{Parse simple TreePPL json SMC output}
+\title{Parse TreePPL SMC output into a tidy data frame}
 \usage{
 tp_parse_smc(treeppl_out)
 }
 \arguments{
-\item{treeppl_out}{a character vector giving the TreePPL json output
-produced by \link{tp_run} using an SMC method.}
+\item{treeppl_out}{A list of sweeps parsed from a SMC JSON output: i.e.,
+the output object of \code{tp_run()}.}
 }
 \value{
-A data frame with the output from inference in TreePPL.
+A tibble with one row per particle, containing:
+\describe{
+\item{sweep}{Sweep index.}
+\item{parameter}{Parameter name, if present in the input JSON.}
+\item{samples}{Sampled value.}
+\item{log_weight}{Log weight of the particle.}
+\item{norm_constant}{Log normalizing constant for the sweep.}
+\item{norm_weight}{Normalized weight, rescaled so the maximum
+total log weight across all particles is 1.}
+}
 }
 \description{
-\code{tp_parse_smc} takes TreePPL json SMC output and returns a data.frame
+Converts a list of parsed SMC sweeps (from \code{tp_run()}) into a
+single tidy tibble of particles, their samples, and normalized weights.
+The function internally removes sweeps with an undefined normalizing constant.
 }
-\details{
-Particles with -Inf weight are removed.
+\examples{
+\dontrun{
+# Fit a quick CRBD model:
+path_data <- tp_data(data_input = "crbd")
+sampler_smc <- tp_compile(
+  model = "crbd",
+  method = "smc-apf",
+  sweeps = 2,
+  particles = 10
+)
+mod_smc <- tp_run(sampler = sampler_smc, data = path_data)
+
+tp_parse_smc(mod_smc)
+}
+
 }

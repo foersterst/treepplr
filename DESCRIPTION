@@ -28,7 +28,10 @@ Imports:
     curl,
     bnpsd,
     rlang,
-    phangorn
+    phangorn,
+    purrr,
+    tibble,
+    dplyr
 Suggests:
     devtools,
     ggplot2,
@@ -42,12 +45,11 @@ Suggests:
     treeio (>= 1.32.0),
     rmarkdown,
     readr,
-    pandoc,
-    dplyr
+    pandoc
 VignetteBuilder: knitr
 Config/Needs/website: rmarkdown
 Remotes: 
     github::maribraga/evolnets,
     bioc::ggtree,
     bioc::treeio
-Config/roxygen2/version: 8.0.0
+Config/roxygen2/version: 8.1.0

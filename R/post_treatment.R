@@ -127,40 +127,66 @@ tp_parse_smc <- function(treeppl_out) {
     dplyr::relocate("sweep")
 }
 
-#' Parse simple TreePPL json MCMC output
+
+#' Parse TreePPL MCMC output into a tidy data frame
 #'
-#' @description
-#' `tp_parse_mcmc` takes TreePPL json MCMC output and returns a data.frame
+#' Converts a list of parsed MCMC runs (from \code{tp_run()}) into a
+#' single tidy tibble of samples, one row per iteration.
 #'
-#' @param treeppl_out a character vector giving the TreePPL json output
-#' produced by [tp_run] using an MCMC method.
+#' @param treeppl_out A list of MCMC runs parsed from MCMC JSON output files: i.e.,
+#' the output object of \code{tp_run()}.
 #'
-#' @return A data frame with the output from inference in TreePPL.
+#' @return A tibble with one row per iteration, containing:
+#'   \describe{
+#'     \item{run}{Run index, corresponding to the position of the run in
+#'       `treeppl_out`.}
+#'     \item{parameter}{Parameter name, if present in the input JSON.}
+#'     \item{samples}{Sampled value.}
+#'   }
+#'
+#' @examples
+#' \dontrun{
+#' # example using a CRBD model with two MCMC chains
+#' path_data <- tp_data(data_input = "crbd")
+#' sampler_mcmc <- tp_compile(model = "crbd", method = "mcmc", iterations = 10)
+#' mod_mcmc <- tp_run(
+#'   sampler = sampler_mcmc,
+#'   data = path_data,
+#'   n_runs = 2
+#' )
+#'
+#' tp_parse_mcmc(mod_mcmc)
+#' }
+#'
 #' @export
 tp_parse_mcmc <- function(treeppl_out) {
-  result_df <- list()
+  parse_run <- function(run, run_id) {
+    samples <- run$samples
+    has_parameter_names <- is.list(samples[[1]]) && !is.null(samples[[1]][["__data__"]])
 
-  for (i in seq_along(treeppl_out)) {
-    samples_c <- unlist(treeppl_out[[i]]$samples)
-
-    if (is.null(names(samples_c))) {
-      result_df <- rbind(
-        result_df,
-        data.frame(
-          run = i,
-          samples = samples_c
+    if (has_parameter_names) {
+      purrr::imap_dfr(samples, function(s, iteration_id) {
+        param_values <- s[["__data__"]]
+        tibble::tibble(
+          run = run_id,
+          parameter = names(param_values),
+          samples = as.numeric(unlist(param_values))
         )
-      )
+      })
     } else {
-      result_df <- rbind(
-        result_df,
-        data.frame(
-          run = i,
-          parameter = names(samples_c),
-          samples = samples_c
+      purrr::imap_dfr(samples, function(s, iteration_id) {
+        tibble::tibble(
+          run = run_id,
+          samples = as.numeric(unlist(s))
         )
-      )
+      })
     }
+  }
+
+  result_df <- purrr::imap_dfr(treeppl_out, parse_run)
+
+  if (nrow(result_df) == 0) {
+    stop("All runs failed")
   }
 
   return(result_df)

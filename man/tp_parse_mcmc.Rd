@@ -2,17 +2,39 @@
 % Please edit documentation in R/post_treatment.R
 \name{tp_parse_mcmc}
 \alias{tp_parse_mcmc}
-\title{Parse simple TreePPL json MCMC output}
+\title{Parse TreePPL MCMC output into a tidy data frame}
 \usage{
 tp_parse_mcmc(treeppl_out)
 }
 \arguments{
-\item{treeppl_out}{a character vector giving the TreePPL json output
-produced by \link{tp_run} using an MCMC method.}
+\item{treeppl_out}{A list of MCMC runs parsed from MCMC JSON output files: i.e.,
+the output object of \code{tp_run()}.}
 }
 \value{
-A data frame with the output from inference in TreePPL.
+A tibble with one row per iteration, containing:
+\describe{
+\item{run}{Run index, corresponding to the position of the run in
+\code{treeppl_out}.}
+\item{parameter}{Parameter name, if present in the input JSON.}
+\item{samples}{Sampled value.}
+}
 }
 \description{
-\code{tp_parse_mcmc} takes TreePPL json MCMC output and returns a data.frame
+Converts a list of parsed MCMC runs (from \code{tp_run()}) into a
+single tidy tibble of samples, one row per iteration.
+}
+\examples{
+\dontrun{
+# example using a CRBD model with two MCMC chains
+path_data <- tp_data(data_input = "crbd")
+sampler_mcmc <- tp_compile(model = "crbd", method = "mcmc", iterations = 10)
+mod_mcmc <- tp_run(
+  sampler = sampler_mcmc,
+  data = path_data,
+  n_runs = 2
+)
+
+tp_parse_mcmc(mod_mcmc)
+}
+
 }

@@ -169,6 +169,7 @@ tp_parse_mcmc <- function(treeppl_out) {
         param_values <- s[["__data__"]]
         tibble::tibble(
           run = run_id,
+          iteration = iteration_id,
           parameter = names(param_values),
           samples = as.numeric(unlist(param_values))
         )
@@ -177,6 +178,7 @@ tp_parse_mcmc <- function(treeppl_out) {
       purrr::imap_dfr(samples, function(s, iteration_id) {
         tibble::tibble(
           run = run_id,
+          iteration = iteration_id,
           samples = as.numeric(unlist(s))
         )
       })

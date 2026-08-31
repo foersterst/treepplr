@@ -2,16 +2,36 @@
 % Please edit documentation in R/post_treatment.R
 \name{tp_mcmc_convergence}
 \alias{tp_mcmc_convergence}
-\title{Check for convergence across multiple MCMC runs.}
+\title{Assess MCMC convergence for a TreePPL analysis}
 \usage{
 tp_mcmc_convergence(treeppl_out)
 }
 \arguments{
-\item{treeppl_out}{a data frame outputted by \code{\link[=tp_parse_mcmc]{tp_parse_mcmc()}}.}
+\item{treeppl_out}{A tibble produced by \code{tp_parse_mcmc()}, with
+columns \code{run}, \code{iteration}, \code{parameter}, and \code{samples}. The input must
+have a \code{parameter} column; output produced from an unnamed TreePPL
+return type is not supported and will raise an error, since there
+is no reliable way to distinguish multiple parameters.}
 }
 \value{
-Gelman and Rubin's convergence diagnostic
+A tibble with one row per parameter, containing:
+\describe{
+\item{parameter}{Parameter name.}
+\item{ess}{Effective sample size, pooled across all runs.}
+\item{rhat_upper}{Upper limit of the Gelman-Rubin R-hat statistic.
+Only computed when \code{treeppl_out} contains more than one run;
+otherwise \code{NA}, with a message explaining why.}
+}
 }
 \description{
-Check for convergence across multiple MCMC runs.
+Computes per-parameter effective sample size (ESS) and, when multiple
+runs are available, the upper limit of the Gelman-Rubin potential scale
+reduction factor (R-hat), using the \pkg{coda} package.
+}
+\examples{
+\dontrun{
+d <- tp_parse_mcmc(mod_mcmc)
+tp_mcmc_convergence(d)
+}
+
 }

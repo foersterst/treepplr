@@ -401,16 +401,82 @@ tp_smc_convergence <- function(treeppl_out) {
 }
 
 
-#' Check for convergence across multiple MCMC runs.
+#' Assess MCMC convergence for a TreePPL analysis
 #'
-#' @param treeppl_out a data frame outputted by [tp_parse_mcmc()].
+#' Computes per-parameter effective sample size (ESS) and, when multiple
+#' runs are available, the upper limit of the Gelman-Rubin potential scale
+#' reduction factor (R-hat), using the \pkg{coda} package.
 #'
-#' @returns Gelman and Rubin's convergence diagnostic
+#' @param treeppl_out A tibble produced by \code{tp_parse_mcmc()}, with
+#'   columns `run`, `iteration`, `parameter`, and `samples`. The input must
+#'   have a `parameter` column; output produced from an unnamed TreePPL
+#'   return type is not supported and will raise an error, since there
+#'   is no reliable way to distinguish multiple parameters.
 #'
+#' @return A tibble with one row per parameter, containing:
+#'   \describe{
+#'     \item{parameter}{Parameter name.}
+#'     \item{ess}{Effective sample size, pooled across all runs.}
+#'     \item{rhat_upper}{Upper limit of the Gelman-Rubin R-hat statistic.
+#'       Only computed when `treeppl_out` contains more than one run;
+#'       otherwise `NA`, with a message explaining why.}
+#'   }
+#'
+#' @examples
+#' \dontrun{
+#' d <- tp_parse_mcmc(mod_mcmc)
+#' tp_mcmc_convergence(d)
+#' }
+#'
+#' @export
 tp_mcmc_convergence <- function(treeppl_out) {
-  # create coda::mcmc objects for each run
-  # list(mcmc objects)
-  # coda::gelman.diag
+  has_parameter <- "parameter" %in% names(treeppl_out)
+
+  # stop if the JSON has no parameter names
+  if (!has_parameter) {
+    stop(
+      "Output JSON has no parameter names.\n",
+      "Re-run the TreePPL model with a named return type (.tppl file) ",
+      "so that parameters can be identified."
+    )
+  }
+
+  runs <- sort(unique(treeppl_out$run))
+  parameters <- unique(treeppl_out$parameter)
+
+  chains_by_parameter <- purrr::map(parameters, function(p) {
+    chains <- purrr::map(runs, function(r) {
+      vals <- treeppl_out |>
+        dplyr::filter(.data$run == r, .data$parameter == p) |>
+        dplyr::arrange(.data$iteration) |>
+        dplyr::pull(.data$samples)
+      coda::mcmc(vals)
+    })
+    coda::mcmc.list(chains)
+  })
+  names(chains_by_parameter) <- parameters
+
+  ess <- purrr::map_dbl(chains_by_parameter, coda::effectiveSize)
+
+  result <- tibble::tibble(parameter = names(ess), ess = ess)
+
+  if (length(runs) > 1) {
+    rhat_upper <- purrr::map_dbl(chains_by_parameter, function(chain_list) {
+      coda::gelman.diag(chain_list)$psrf[, "Upper C.I."]
+    })
+    result$rhat_upper <- rhat_upper[result$parameter]
+  } else {
+    result$rhat_upper <- NA
+    message(
+      "Only one run detected; Gelman-Rubin R-hat requires >= 2 runs and was not computed."
+    )
+  }
+
+  if (!has_parameter) {
+    result <- dplyr::select(result, -"parameter")
+  }
+
+  return(result)
 }
 
 

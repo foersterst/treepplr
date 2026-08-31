@@ -31,7 +31,8 @@ Imports:
     phangorn,
     purrr,
     tibble,
-    dplyr
+    dplyr,
+    coda
 Suggests:
     devtools,
     ggplot2,

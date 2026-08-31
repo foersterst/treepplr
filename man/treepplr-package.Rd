@@ -23,6 +23,8 @@ Useful links:
 Authors:
 \itemize{
   \item Mariana P Braga \email{mpiresbr@gmail.com} (\href{https://orcid.org/0000-0002-1253-2536}{ORCID})
+  \item Tim Virgoulay
+  \item Stenio I A Foerster
 }
 
 }

@@ -11,6 +11,10 @@ test_that("Test-data_1a : tp_data name", {
     version <- list.files("/tmp",
                           pattern = paste0("treeppl-", TPPLC_VERSION),
                           full.names = TRUE)
+    if (length(version) == 0) {
+      version <- unlist(strsplit(Sys.getenv("MCORE_LIBS"), "treeppl="))[2]
+    }
+
     data_right <- system(paste0("find ", version, " -name testdata_coin.json"), intern = T)
 
     data <- treepplr::tp_data("coin")

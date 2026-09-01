@@ -33,6 +33,10 @@ test_that("Test-model_2a : tp_compile model name", {
                         pattern = paste0("treeppl-", TPPLC_VERSION),
                         full.names = TRUE)
 
+  if (length(version) == 0) {
+    version <- unlist(strsplit(Sys.getenv("MCORE_LIBS"), "treeppl="))[2]
+  }
+
   model_right = system(paste0("find ", version, " -name crbd.tppl"), intern = T)
 
   expect_equal(readr::read_file(sampler$model_path), readr::read_file(model_right))
@@ -44,6 +48,10 @@ test_that("Test-model_2b : tp_compile model path ", {
   version <- list.files("/tmp",
                         pattern = paste0("treeppl-", TPPLC_VERSION),
                         full.names = TRUE)
+
+  if (length(version) == 0) {
+    version <- unlist(strsplit(Sys.getenv("MCORE_LIBS"), "treeppl="))[2]
+  }
 
   model_right = system(paste0("find ", version, " -name crbd.tppl"), intern = T)
   sampler <- treepplr::tp_compile(model_right)

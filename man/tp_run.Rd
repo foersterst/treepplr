@@ -2,7 +2,7 @@
 % Please edit documentation in R/run.R
 \name{tp_run}
 \alias{tp_run}
-\title{Run a TreePPL program}
+\title{Run a TreePPL sampler}
 \usage{
 tp_run(
   sampler,
@@ -15,29 +15,40 @@ tp_run(
 )
 }
 \arguments{
-\item{sampler}{a \link{sampler_T} outputted by \link{tp_compile}.}
+\item{sampler}{a sampler produced by \code{tp_compile()}.}
 
-\item{data}{a \link[base:character]{base::character} with the full path to the data file in TreePPL
-JSON format (as outputted by \link{tp_data}).}
+\item{data}{input data, produced by \code{tp_data()}.}
 
-\item{dir}{a \link[base:character]{base::character} with the full path to the directory where you
-want to save the output. Default is \code{\link[base:tempdir]{base::tempdir()}}.}
+\item{dir}{the full path to the directory where
+you want to save the output. Defaults to \code{tp_tempdir()}.}
 
-\item{out_file_name}{a \link[base:character]{base::character} with the name of the output file in
-JSON format. Default is "out".}
+\item{out_file_name}{the name of the output file in JSON format. Defaults to \code{"out"}.}
 
-\item{n_runs}{a \link[base:numeric]{base::numeric} giving the numbers of sweeps(SMC)/runs(MCMC).}
+\item{n_runs}{(\code{integer}) the number of sweeps (SMC) or runs
+(MCMC).}
 
-\item{n_processes}{a \link[base:numeric]{base::numeric}, number of parallel processes to use.
-Can't be superior to n_runs.}
+\item{n_processes}{(\code{integer}) the number of parallel processes to use.
+Cannot be greater than \code{n_runs}.}
 
-\item{...}{See \link{tp_runtime_options} for all supported arguments.}
+\item{...}{See \code{\link[=tp_runtime_options]{tp_runtime_options()}} for all supported arguments.}
 }
 \value{
-A list of TreePPL output in parsed JSON format.
+If a parser is available for the model/method combination, a parsed
+tidy data frame of TreePPL output via \code{tp_parse_smc()} or \code{tp_parse_mcmc()}.
+Otherwise, the full path(s) to the raw JSON output file(s),
+along with a console message explaining that no parser is available.
 }
 \description{
-Run TreePPL and return output.
+Executes a compiled TreePPL sampler on the given data, saves the raw JSON
+output to disk, prints a run summary, and, when a parser is available for
+the model/method combination, parses the output into tidy data frames.
+}
+\details{
+If the model belongs to a category without an available parser (e.g.
+\code{"host-repertoire-evolution"}, \code{"tree-inference"}), or if the inference
+method is neither SMC nor MCMC, no parsing is attempted: a message is
+printed pointing to the output directory, and the raw output file path(s)
+are returned instead.
 }
 \examples{
 \dontrun{

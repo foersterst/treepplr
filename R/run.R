@@ -1,22 +1,34 @@
-#' Run a TreePPL program
+#' Run a TreePPL sampler
 #'
 #' @description
-#' Run TreePPL and return output.
+#' Executes a compiled TreePPL sampler on the given data, saves the raw JSON
+#' output to disk, prints a run summary, and, when a parser is available for
+#' the model/method combination, parses the output into tidy data frames.
 #'
-#' @param sampler a [treepplr::sampler_T] outputted by [treepplr::tp_compile].
-#' @param data a [base::character] with the full path to the data file in TreePPL
-#' JSON format (as outputted by [treepplr::tp_data]).
-#' @param dir a [base::character] with the full path to the directory where you
-#' want to save the output. Default is [base::tempdir()].
-#' @param out_file_name a [base::character] with the name of the output file in
-#' JSON format. Default is "out".
-#' @param n_runs a [base::numeric] giving the numbers of sweeps(SMC)/runs(MCMC).
-#' @param n_processes a [base::numeric], number of parallel processes to use.
-#' Can't be superior to n_runs.
-#' @param ... See [treepplr::tp_runtime_options] for all supported arguments.
+#' @param sampler a sampler produced by \code{tp_compile()}.
+#' @param data input data, produced by \code{tp_data()}.
+#' @param dir the full path to the directory where
+#' you want to save the output. Defaults to \code{tp_tempdir()}.
+#' @param out_file_name the name of the output file in JSON format. Defaults to `"out"`.
+#' @param n_runs (\code{integer}) the number of sweeps (SMC) or runs
+#' (MCMC).
+#' @param n_processes (\code{integer}) the number of parallel processes to use.
+#' Cannot be greater than `n_runs`.
+#' @param ... See [treepplr::tp_runtime_options()] for all supported arguments.
 #'
+#' @details
+#' If the model belongs to a category without an available parser (e.g.
+#' `"host-repertoire-evolution"`, `"tree-inference"`), or if the inference
+#' method is neither SMC nor MCMC, no parsing is attempted: a message is
+#' printed pointing to the output directory, and the raw output file path(s)
+#' are returned instead.
 #'
-#' @return A list of TreePPL output in parsed JSON format.
+#' @return
+#' If a parser is available for the model/method combination, a parsed
+#' tidy data frame of TreePPL output via `tp_parse_smc()` or `tp_parse_mcmc()`.
+#' Otherwise, the full path(s) to the raw JSON output file(s),
+#' along with a console message explaining that no parser is available.
+#'
 #' @export
 #'
 #' @examples
@@ -42,14 +54,17 @@
 #' # run TreePPL
 #' result <- tp_run(exe_path, data_path)
 #' }
-
-tp_run <- function(sampler,
-                   data,
-                   dir = NULL,
-                   out_file_name = "out",
-                   n_runs = 1,
-                   n_processes = 3,
-                   ...) {
+tp_run <- function(
+  sampler,
+  data,
+  dir = NULL,
+  out_file_name = "out",
+  n_runs = 1,
+  n_processes = 3,
+  ...
+) {
+  # start time
+  tt <- Sys.time()
 
   if (is.null(dir)) {
     dir_path <- tp_tempdir()
@@ -57,16 +72,18 @@ tp_run <- function(sampler,
     dir_path <- dir
   }
 
-  listFiles <- list.files(path = dir_path,
-                          pattern = out_file_name,
-                          full.names = TRUE)
-  if(length(listFiles) != 0) {
+  listFiles <- list.files(
+    path = dir_path,
+    pattern = out_file_name,
+    full.names = TRUE
+  )
+  if (length(listFiles) != 0) {
     file.remove(listFiles)
   }
 
   output_path <- paste0(dir_path, out_file_name, ".json")
 
-  #If a list have multiple time the same key
+  # If a list have multiple time the same key
   # list[[key]] will return the first key
   # Exemple
   #> lis <- list(method = "mcmc", method = "smc")
@@ -103,12 +120,71 @@ tp_run <- function(sampler,
     system(command)
   }
 
-  listFiles <- list.files(path = dir_path,
-                          pattern = out_file_name,
-                          full.names = TRUE)
+  # the output (JSON) files
+  listFiles <- list.files(
+    path = dir_path,
+    pattern = out_file_name,
+    full.names = TRUE
+  )
 
-  json_out <- readr::read_lines(listFiles) |>
-    lapply(jsonlite::fromJSON, simplifyVector = FALSE)
+  # Run Info #
+  # elapsed time
+  et <- round(Sys.time() - tt, digits = 2)
+  # take method & model from sampler
+  mtd <- sampler$compile_options$method
+  mod <- sampler$compile_options$model
+  # output files
+  of <- list.files(
+    path = dir_path,
+    pattern = out_file_name,
+    full.names = FALSE
+  )
+  of <- paste(of, collapse = ", ")
 
-  return(json_out)
+  # run info summary
+  run_info <- paste0(
+    crayon::bold("Analysis Summary\n"),
+    "-----------------------------\n",
+    crayon::green("Status: "), "Completed\n",
+    crayon::cyan("Time elapsed: "), et, "\n",
+    crayon::cyan("Model: "), mod, "\n",
+    crayon::cyan("Method: "), mtd, "\n",
+    crayon::cyan("Output directory: "), dir_path, "\n",
+    crayon::cyan("Output file(s): "), of, "\n"
+  )
+
+  # print run info summary
+  cat(run_info)
+
+  # parse JSON to tidy data frames & return #
+  # get model category: this is needed because at the moment, we do not have parsers
+  # for models that return trees. NB: This is a temporary solution while we come up
+  # with new parsers.
+  mc <- tp_model_library()
+  mod_cat <- mc[mc$model_name == mod, ]$category
+
+  # model categories with unavailable parsers
+  no_parsers <- c(
+    "host-repertoire-evolution",
+    "tree-inference"
+  )
+
+  if (mod_cat %in% no_parsers) {
+    message(
+      "Sorry, we don't have a parser for this model and/or inference method yet.\n",
+      paste0("The output file(s) can be found in: ", dir_path)
+    )
+    res <- listFiles
+  } else if (grepl("smc", mtd, ignore.case = TRUE)) {
+    res <- tp_parse_smc(listFiles)
+  } else if (grepl("mcmc", mtd, ignore.case = TRUE)) {
+    res <- tp_parse_mcmc(listFiles)
+  } else {
+    message(
+      "Sorry, we don't have a parser for method '", mtd, "' yet.\n",
+      paste0("The output file(s) can be found in: ", dir_path)
+    )
+    res <- listFiles
+  }
+  return(res)
 }

@@ -9,6 +9,7 @@ export(tp_installing_treeppl)
 export(tp_json_to_phylo)
 export(tp_list)
 export(tp_map_tree)
+export(tp_mcmc_convergence)
 export(tp_model_library)
 export(tp_parse_host_rep)
 export(tp_parse_mcmc)
@@ -23,6 +24,8 @@ export(tp_write_data)
 export(tp_write_model)
 importFrom(bnpsd,tree_reorder)
 importFrom(methods,is)
-importFrom(phangorn,add_edge_length)
-importFrom(phangorn,allCompat)
+importFrom(phangorn,
+  add_edge_length,
+  allCompat
+)
 importFrom(rlang,.data)

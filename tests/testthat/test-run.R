@@ -5,36 +5,52 @@ require(crayon)
 
 cat(crayon::yellow("\nTest-run : Running TreePPL.\n"))
 
-test_that("Test-run_1a : tp_run", {
-  cat("\tTest-run_1a : tp_run \n")
-
-  sampler <- treepplr::tp_compile("crbd", method = "smc-apf", particles = 2)
-  data <- treepplr::tp_data("crbd")
-
-  result <- treepplr::tp_run(sampler, data, sweeps = 1)
-
-  expect_equal(2, length(result[[1]]$samples))
-
+test_that("Test-run_1a : tp_run SMC", {
+  cat("\tTest-run_1a : tp_run SMC \n")
+  run_smc <- tp_run(
+    sampler = tp_compile(model = "crbd", method = "smc-apf", sweeps = 2, particles = 5),
+    data = tp_data(data_input = "crbd")
+  )
+  expect_equal(2, length(unique(run_smc$sweep)))
 })
 
-test_that("Test-run_1a : tp_run custom name", {
-  cat("\tTest-run_1a : tp_run \n")
-
-  sampler <- treepplr::tp_compile("crbd", method = "smc-apf", particles = 2)
-  data <- treepplr::tp_data("crbd")
-
-  result <-treepplr::tp_run(sampler, data, sweeps = 1, out_file_name = "test_out", particles = 5)
-
-  expect_equal(5, length(result[[1]]$samples))
+test_that("Test-run_1b : tp_run MCMC", {
+  cat("\tTest-run_1b : tp_run MCMC \n")
+  run_mcmc <- tp_run(
+    sampler = tp_compile(model = "crbd", method = "mcmc", iterations = 10),
+    data = tp_data(data_input = "crbd"),
+    n_runs = 2,
+    n_processes = 2
+  )
+  expect_equal(2, length(unique(run_mcmc$run)))
 })
 
-test_that("Test-run_1c : tp_run threading", {
-  cat("\tTest-run_1c : tp_run \n")
+test_that("Test-run_1c : tp_run custom_name", {
+  cat("\tTest-run_1c : tp_run custom_name \n")
+  run_smc <- tp_run(
+    sampler = tp_compile(model = "crbd", method = "smc-apf", sweeps = 2, particles = 5),
+    data = tp_data(data_input = "crbd"),
+    out_file_name = "test_out"
+  )
+  expect_equal(2, length(unique(run_smc$sweep)))
+})
 
-  sampler <- treepplr::tp_compile("crbd", method = "smc-apf", particles = 2)
-  data <- treepplr::tp_data("crbd")
+test_that("Test-run_1d : tp_run threading", {
+  cat("\tTest-run_1d : tp_run threading \n")
+  run_smc <- tp_run(
+    sampler = tp_compile(model = "crbd", method = "smc-apf", sweeps = 2, particles = 5),
+    data = tp_data(data_input = "crbd"),
+    n_processes = 2
+  )
+  expect_equal(2, length(unique(run_smc$sweep)))
+})
 
-  result <-treepplr::tp_run(sampler, data, sweeps = 1, out_file_name = "test_out", particles = 5, , n_runs = 10)
-
-  expect_equal(10, length(result))
+test_that("Test-run_1e : tp_run no_parser", {
+  cat("\tTest-run_1e : tp_run no_parser \n")
+  run_smc <- tp_run(
+    sampler = tp_compile(model = "tree_inference", method = "smc-apf", sweeps = 2, particles = 5),
+    data = tp_data(data_input = "tree_inference"),
+    n_processes = 2
+  )
+  expect_true(is.character(run_smc))
 })

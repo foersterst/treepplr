@@ -1,11 +1,10 @@
 #' Parse TreePPL SMC output into a tidy data frame
 #'
-#' Converts a list of parsed SMC sweeps (from \code{tp_run()}) into a
+#' Converts a JSON file from an SMC analysis produced by TreePPL into a
 #' single tidy tibble of particles, their samples, and normalized weights.
 #' The function internally removes sweeps with an undefined normalizing constant.
 #'
-#' @param treeppl_out A list of sweeps parsed from a SMC JSON output: i.e.,
-#' the output object of \code{tp_run()}.
+#' @param json_path The full path to the (SMC) JSON file produced by TreePPL.
 #'
 #' @return A tibble with one row per particle, containing:
 #'   \describe{
@@ -20,21 +19,35 @@
 #'
 #' @examples
 #' \dontrun{
-#' # Fit a quick CRBD model:
-#' path_data <- tp_data(data_input = "crbd")
-#' sampler_smc <- tp_compile(
-#'   model = "crbd",
-#'   method = "smc-apf",
-#'   sweeps = 2,
-#'   particles = 10
+#' # fit a CRBD model
+#' run_smc <- tp_run(
+#'   data = tp_data(data_input = "crbd"),
+#'   sampler = tp_compile(
+#'     model = "crbd",
+#'     method = "smc-apf",
+#'     sweeps = 2,
+#'     particles = 10
+#'   )
 #' )
-#' mod_smc <- tp_run(sampler = sampler_smc, data = path_data)
 #'
-#' tp_parse_smc(mod_smc)
+#' # get the path to the output JSON file:
+#' out_file <- list.files(
+#'   path = tp_tempdir(),
+#'   pattern = "out",
+#'   full.names = TRUE
+#' )
+#'
+#' # parse JSON to a tidy data frame
+#' tp_parse_smc(json_path = out_file)
 #' }
 #'
 #' @export
-tp_parse_smc <- function(treeppl_out) {
+tp_parse_smc <- function(json_path) {
+  # read in the JSON file(s)
+  treeppl_out <- readr::read_lines(json_path)
+  treeppl_out <- lapply(treeppl_out, jsonlite::fromJSON, simplifyVector = FALSE)
+
+  # parse sweeps
   parse_sweep <- function(sweep, sweep_id) {
     # remove sweeps with nan norm const
     if (identical(sweep$normConst, "nan")) {
@@ -130,36 +143,48 @@ tp_parse_smc <- function(treeppl_out) {
 
 #' Parse TreePPL MCMC output into a tidy data frame
 #'
-#' Converts a list of parsed MCMC runs (from \code{tp_run()}) into a
+#' Converts JSON file(s) produced by an MCMC analysis in TreePPL into a
 #' single tidy tibble of samples, one row per iteration.
 #'
-#' @param treeppl_out A list of MCMC runs parsed from MCMC JSON output files: i.e.,
-#' the output object of \code{tp_run()}.
+#' @param json_path The full path to the (MCMC) JSON file(s) produced by TreePPL.
 #'
 #' @return A tibble with one row per iteration, containing:
 #'   \describe{
-#'     \item{run}{Run index, corresponding to the position of the run in
-#'       `treeppl_out`.}
+#'     \item{run}{Run index.}
 #'     \item{parameter}{Parameter name, if present in the input JSON.}
 #'     \item{samples}{Sampled value.}
 #'   }
 #'
 #' @examples
 #' \dontrun{
-#' # example using a CRBD model with two MCMC chains
-#' path_data <- tp_data(data_input = "crbd")
-#' sampler_mcmc <- tp_compile(model = "crbd", method = "mcmc", iterations = 10)
-#' mod_mcmc <- tp_run(
-#'   sampler = sampler_mcmc,
-#'   data = path_data,
-#'   n_runs = 2
+#'
+#' # Let's use a quick CRBD model as example
+#' run_mcmc <- tp_run(
+#' sampler = tp_compile(model = "crbd", method = "mcmc", iterations = 10),
+#' data = tp_data(data_input = "crbd"),
+#' n_runs = 2, # this will produce two JSON files as output
+#' n_processes = 2
 #' )
 #'
-#' tp_parse_mcmc(mod_mcmc)
+#' # get the path to the output JSON file; note that the number of JSON
+#' # files produced is equal to n_runs specified above
+#' out_file <- list.files(
+#'   path = tp_tempdir(),
+#'   pattern = "out",
+#'   full.names = TRUE
+#' )
+#'
+#' # parse JSON to a tidy data frame
+#' tp_parse_mcmc(json_path = out_file)
 #' }
 #'
 #' @export
-tp_parse_mcmc <- function(treeppl_out) {
+tp_parse_mcmc <- function(json_path) {
+  # read in the JSON file(s)
+  treeppl_out <- readr::read_lines(json_path)
+  treeppl_out <- lapply(treeppl_out, jsonlite::fromJSON, simplifyVector = FALSE)
+
+  # parse mcmc runs
   parse_run <- function(run, run_id) {
     samples <- run$samples
     has_parameter_names <- is.list(samples[[1]]) && !is.null(samples[[1]][["__data__"]])

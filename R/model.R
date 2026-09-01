@@ -258,8 +258,9 @@ tp_compile <- function(model, method = "mcmc", ...) {
   user_list <- append(list(method = method), tp_list(...))
   tmp <- list_to_options(user_list)
 
-  sampler$compile_options <- tmp[["compile"]]
+  sampler$compile_options <- c(tmp[["compile"]], "model" = model)
   full_options = append(tmp[["compile"]], tmp[["runtime"]])
   sampler$exe_path <- compilation(sampler$model_path, options_to_string(full_options))
+
   return(sampler)
 }

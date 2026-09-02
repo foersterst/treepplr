@@ -33,7 +33,8 @@ Imports:
     tibble,
     dplyr,
     coda,
-    crayon
+    crayon,
+    tidyr
 Suggests:
     devtools,
     ggplot2,

@@ -4,17 +4,22 @@
 \alias{tp_parse_mcmc}
 \title{Parse TreePPL MCMC output into a tidy data frame}
 \usage{
-tp_parse_mcmc(json_path)
+tp_parse_mcmc(json_path, wide = TRUE)
 }
 \arguments{
 \item{json_path}{The full path to the (MCMC) JSON file(s) produced by TreePPL.}
+
+\item{wide}{Logical. If \code{TRUE} (default), return the data frame in wide format,
+with one column per parameter. If \code{FALSE}, return the data frame in long format,
+with parameter names and values stored in \code{parameter}
+and \code{sample} columns.}
 }
 \value{
 A tibble with one row per iteration, containing:
 \describe{
 \item{run}{Run index.}
 \item{parameter}{Parameter name, if present in the input JSON.}
-\item{samples}{Sampled value.}
+\item{sample}{Sampled value.}
 }
 }
 \description{

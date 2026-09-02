@@ -4,17 +4,22 @@
 \alias{tp_parse_smc}
 \title{Parse TreePPL SMC output into a tidy data frame}
 \usage{
-tp_parse_smc(json_path)
+tp_parse_smc(json_path, wide = TRUE)
 }
 \arguments{
 \item{json_path}{The full path to the (SMC) JSON file produced by TreePPL.}
+
+\item{wide}{Logical. If \code{TRUE} (default), return the data frame in wide format,
+with one column per parameter. If \code{FALSE}, return the data frame in long format,
+with parameter names and values stored in \code{parameter}
+and \code{sample} columns.}
 }
 \value{
 A tibble with one row per particle, containing:
 \describe{
 \item{sweep}{Sweep index.}
 \item{parameter}{Parameter name, if present in the input JSON.}
-\item{samples}{Sampled value.}
+\item{sample}{Sampled value.}
 \item{log_weight}{Log weight of the particle.}
 \item{norm_constant}{Log normalizing constant for the sweep.}
 \item{norm_weight}{Normalized weight, rescaled so the maximum

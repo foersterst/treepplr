@@ -7,11 +7,8 @@
 tp_mcmc_convergence(treeppl_out)
 }
 \arguments{
-\item{treeppl_out}{A tibble produced by \code{tp_parse_mcmc()}, with
-columns \code{run}, \code{iteration}, \code{parameter}, and \code{samples}. The input must
-have a \code{parameter} column; output produced from an unnamed TreePPL
-return type is not supported and will raise an error, since there
-is no reliable way to distinguish multiple parameters.}
+\item{treeppl_out}{A tibble produced by \code{tp_parse_mcmc()}, in either long
+or wide format.}
 }
 \value{
 A tibble with one row per parameter, containing:
@@ -28,10 +25,25 @@ Computes per-parameter effective sample size (ESS) and, when multiple
 runs are available, the upper limit of the Gelman-Rubin potential scale
 reduction factor (R-hat), using the \pkg{coda} package.
 }
+\details{
+Output produced from an unnamed return type in TreePPL (\code{.tppl} file) is not
+supported and will raise an error, since there is no reliable way to
+distinguish multiple parameters.
+}
 \examples{
 \dontrun{
-d <- tp_parse_mcmc(mod_mcmc)
-tp_mcmc_convergence(d)
+
+# CRBD model using MCMC
+run_mcmc <- tp_run(
+sampler = tp_compile(model = "crbd", method = "mcmc", iterations = 10),
+data = tp_data(data_input = "crbd"),
+n_runs = 2,
+n_processes = 2
+)
+
+# tp_run() already returns the output of tp_parse_mcmc(), so we can call
+# tp_mcmc_convergence() directly:
+tp_mcmc_convergence(run_mcmc)
 }
 
 }

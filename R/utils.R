@@ -1,233 +1,266 @@
-#' Platform-dependent treeppl self-contained installation
+# Exported Functions ----------------------------------------------------------------
+
+#' Platform-dependent TreePPL self-contained installation
+#'
 #' @description
-#' `tp_installing_treeppl` will search for the local version tpplc associate
-#' with the package. Will download it if it's not detected on the computer.
+#' `tp_installing_treeppl()` looks for the `tpplc` compiler associated with the
+#' package and, if it is not found, downloads and unpacks it.
 #'
-#' @param download Will download the associate tpplc version in the dir next
-#' to your local treepplr installation if not present.
+#' @details
+#' The search order is:
+#' 1. the `TPPLC` environment variable;
+#' 2. on Windows, a manual installation of `tpplc` (no self-contained build is
+#'    available);
+#' 3. an already unpacked copy in `/tmp`;
+#' 4. a downloaded tarball in the `treeppl` directory next to the local
+#'    treepplr installation (downloaded first if `download = TRUE`).
 #'
-#' @param keep_previous Will download the associate tpplc version in the dir next
-#' to your local treepplr installation if not present.
+#' @param download Logical. Download the associated `tpplc` version if it is not
+#'   present locally.
+#' @param keep_previous Logical. Keep previously downloaded `tpplc` versions
+#'   instead of deleting them before the new download.
 #'
-#' @return The path for TreePPL compiler.
+#' @return The path to the TreePPL compiler.
 #' @export
-tp_installing_treeppl <- function(download = TRUE,
-                                  keep_previous = FALSE) {
-  if (Sys.getenv("TPPLC") != "") {
-    tpplc_path <- Sys.getenv("TPPLC")
-  } else{
-    if (Sys.info()['sysname'] == "Windows") {
-      # No self container for Windows, need to install it manually
-      "tpplc"
-    } else {
-      path_treeppl <-
-        list.files(
-          path = paste0(.libPaths()[1], "/treeppl/", TPPLC_VERSION),
-          full.names = TRUE
-        )
-    }
-    # Test if tpplc is already here
-    tpplc_path <- paste0("/tmp/treeppl-", TPPLC_VERSION, "/tpplc")
-    if (!file.exists(tpplc_path)) {
-      if (download && length(path_treeppl) == 0) {
-        tag <- tp_fp_fetch(keep_previous)
-        path_treeppl <-
-          list.files(
-            path = paste0(.libPaths()[1], "/treeppl/", TPPLC_VERSION),
-            full.names = TRUE
-          )
-      }
-      if (length(path_treeppl) != 0) {
-        message("TreePPL initialisation ...please wait...")
-        utils::untar(path_treeppl, exdir = "/tmp", verbose = FALSE)
-        message("TreePPL initialisation : Done")
-      }
-    }
+tp_installing_treeppl <- function(download = TRUE, keep_previous = FALSE) {
+  tpplc_env <- Sys.getenv("TPPLC")
+  if (tpplc_env != "") {
+    return(tpplc_env)
   }
+
+  # No self-contained build for Windows: tpplc must be installed manually
+  if (Sys.info()[["sysname"]] == "Windows") {
+    return("tpplc")
+  }
+
+  tpplc_path <- file.path("/tmp", paste0("treeppl-", TPPLC_VERSION), "tpplc")
+  if (file.exists(tpplc_path)) {
+    return(tpplc_path)
+  }
+
+  tarball <- list.files(.install_dir(), full.names = TRUE)
+  if (length(tarball) == 0 && download) {
+    tarball <- .fetch_treeppl(keep_previous)
+  }
+
+  if (length(tarball) > 0) {
+    cli::cli_progress_step(
+      "Initialising TreePPL",
+      msg_done = "Ready!"
+    )
+    utils::untar(tarball[[1]], exdir = "/tmp", verbose = FALSE)
+    cli::cli_progress_done()
+  }
+
   tpplc_path
 }
 
-# Fetch the associate version of TreePPL if needed
-tp_fp_fetch <- function(keep_previous = FALSE) {
-  if (Sys.info()["sysname"] == "Windows") {
-    # no self container for Windows, need to install it manually
-    "-1"
-  } else {
-    # Check for Linux
-    if (Sys.info()["sysname"] == "Linux") {
-      # assets[[2]] because releases are in alphabetical order (1 = Mac, 2 = Linux)
-      name <- paste0("treeppl-", TPPLC_VERSION, "-x86_64-linux.tar.gz")
-    } else {
-      name <- paste0("treeppl-", TPPLC_VERSION, "-aarch64-darwin.tar.gz")
-    }
-
-    url <- paste0(
-      "https://github.com/treeppl/treeppl/releases/download/v",
-      TPPLC_VERSION,
-      "/",
-      name
-    )
-    # local repository
-    file_name <- list.files(
-      path = paste0(.libPaths()[1], "/treeppl/", TPPLC_VERSION),
-      full.names = TRUE
-    )
-    # download file if file_name is empty
-    if (length(file_name) == 0) {
-      if (!keep_previous) {
-
-      }
-      # create destination folder if treeppl dir doesn't exist
-      dest_folder <- paste0(.libPaths()[1], "/treeppl")
-      if (!keep_previous) {
-        system(
-          paste("rm -rf", dest_folder),
-          ignore.stdout = FALSE,
-          ignore.stderr = FALSE
-        )
-      }
-      system(
-        paste("mkdir", dest_folder),
-        ignore.stdout = FALSE,
-        ignore.stderr = FALSE
-      )
-      # create destination folder if version dir doesn't exist
-      version_dir <- paste(dest_folder, TPPLC_VERSION, sep = "/")
-      system(
-        paste("mkdir", version_dir),
-        ignore.stdout = TRUE,
-        ignore.stderr = TRUE
-      )
-      # download
-      fn <- paste(version_dir, name, sep = "/")
-      curl::curl_download(url, destfile = fn, quiet = FALSE)
-    }
-  }
-  TPPLC_VERSION
-}
-
-#' Temporary directory for running treeppl
+#' Temporary directory for running TreePPL
 #'
 #' @description
-#' `tp_tempdir` returns a normalized path for a temporary directory where the
-#' executables can read and write temporary files.
+#' `tp_tempdir()` creates (if needed) and returns a normalized path to a
+#' temporary directory where the executables can read and write files.
 #'
-#' @param temp_dir NULL, or a path to be used; if NULL, R's [base::tempdir]
-#' is used.
-#' @param sep Better ignored; non-default values are passed to
-#' [base::normalizePath].
-#' @param sub Extension for defining a sub-directory within the directory
-#' defined by [base::tempdir].
+#' @param temp_dir A path to be used, or `NULL` to use R's [base::tempdir()].
+#' @param sub Optional name of a sub-directory inside `temp_dir`.
 #'
-#' @return Normalized path with system-dependent terminal separator.
+#' @return A normalized path ending with the system-dependent file separator.
 #' @export
-
-tp_tempdir <- function(temp_dir = NULL,
-                       sep = NULL,
-                       sub = NULL) {
-  if (is.null(sep)) {
-    sep <- sep()
-    if (is.null(temp_dir))
-      temp_dir <- tempdir()
-    temp_dir <- normalizePath(temp_dir, sep)
-    if (substring(temp_dir, nchar(temp_dir)) != sep) {
-      temp_dir <- paste0(temp_dir, sep)
-    }
-    if (!is.null(sub))
-      temp_dir <- paste0(temp_dir, sub, sep)
-    if (!dir.exists(temp_dir))
-      dir.create(temp_dir)
-    temp_dir
+tp_tempdir <- function(temp_dir = NULL, sub = NULL) {
+  path <- if (is.null(temp_dir)) tempdir() else temp_dir
+  if (!is.null(sub)) {
+    path <- file.path(path, sub)
   }
+
+  dir.create(path, recursive = TRUE, showWarnings = FALSE)
+  paste0(normalizePath(path), .Platform$file.sep)
 }
 
-# Platform-dependent separator character
-sep <- function() {
-  .Platform$file.sep
-}
-
-#' Model names supported by treepplr
+#' Models implemented in treepplr
 #'
-#' @description Provides a list of all models in the TreePPL model library.
+#' @description
+#' `tp_model_library()` lists all models in the TreePPL model library.
 #'
-#' @return A list of model names.
+#' @return A data frame of class `tp_model_library` with columns `category`
+#'   and `model_name`, ordered by category and then by model name. Printing
+#'   the object shows the models grouped by category. It can still be subset
+#'   like a regular data frame, for example `tp_model_library()$model_name`.
 #' @export
 tp_model_library <- function() {
-  mn <- tp_find("","tppl")
-  subcategory <- grepl(".*models/([^/]+)/([^/]+)/([^/]+)\\.tppl$", mn)
-  no_sub <- mn[!subcategory]
-  # results in a data frame
-  rs <- data.frame(
-    "category" = sub(".*models/([^/]+)/.*", "\\1", no_sub),
-    "model_name" = sub(".*/([^/]+)\\.tppl$", "\\1", no_sub)
+  paths <- .find("model")
+
+  # Keep only models stored directly in a category: models/<category>/<model>
+  paths <- paths[!grepl("models/[^/]+/[^/]+/[^/]+\\.tppl$", paths)]
+
+  library <- data.frame(
+    category = basename(dirname(paths)),
+    model_name = tools::file_path_sans_ext(basename(paths))
   )
-  # order by category then by model name
-  rs <- rs[order(rs$category, rs$model_name, decreasing = FALSE), ]
-  rownames(rs) <- NULL
-  rs
-}
+  library <- library[order(library$category, library$model_name), ]
+  rownames(library) <- NULL
+  class(library) <- c("tp_model_library", class(library))
 
-# Function to find the path of model and data files based on a model name and extension
-tp_find <- function(model_name, ext) {
-  # path to the model library
-  version <- unlist(strsplit(Sys.getenv("MCORE_LIBS"), "treeppl="))[2]
-  if (!is.na(version)) {
-    version <- list.files(version, pattern = "models", full.names = TRUE)
-    # path to the required model
-    fd <- list.files(
-      path = version,
-      pattern = paste0(model_name, ext),
-      recursive = TRUE,
-      full.names = TRUE
-    )
-  } else {
-    tp_installing_treeppl()
-    fd <- list.files("/tmp",
-                     pattern = paste0("treeppl-", TPPLC_VERSION),
-                     full.names = TRUE)
-    fd <- list.files(fd, pattern = "treeppl", full.names = TRUE)
-    fd <- paste0(fd, "/lib/mcore/treeppl/models")
-    # path to the required model
-    fd <- list.files(
-      path = fd,
-      pattern = paste0(model_name, ext),
-      recursive = TRUE,
-      full.names = TRUE
-    )
-  }
-  return(fd)
-}
-
-# Find model for model_name
-tp_find_model <- function(model_name) {
-  tp_find(model_name, ".tppl")
-}
-
-# Find data for model_name
-tp_find_data <- function(model_name) {
-  tp_find(model_name, ".json")
+  library
 }
 
 #' Create a flat list
 #'
 #' @description
-#' `tp_list` takes a variable number of arguments and returns a list.
+#' `tp_list()` takes a variable number of arguments and returns a list.
 #'
-#' @param ... Variadic arguments (see details).
+#' @param ... Either independent arguments (`name = value`), or a single
+#'   structured list.
 #'
 #' @details
-#' This function takes a variable number of arguments, so that users can pass as
-#' arguments either independent lists, or a single structured
-#' list of list (name_arg = value_arg).
+#' If a single list is supplied, it is returned as is, so that users can pass
+#' either several arguments or one list of arguments.
 #'
 #' @return A list.
 #' @export
 tp_list <- function(...) {
-  dotlist <- list(...)
+  args <- list(...)
 
-  if (length(dotlist) == 1L && is.list(dotlist[[1]])) {
-    dotlist <- dotlist[[1]]
+  if (length(args) == 1 && is.list(args[[1]])) {
+    args <- args[[1]]
   }
 
-  dotlist
+  args
 }
+
+
+# Helper Functions ------------------------------------------------------------------
+
+#' Directory holding the downloaded TreePPL tarball
+#'
+#' @description
+#' `.install_dir()` builds the path of the directory, next to the local treepplr
+#' installation, where the tarball of the associated `tpplc` version is stored.
+#'
+#' @return A path (character string).
+#' @noRd
+.install_dir <- function() {
+  file.path(.libPaths()[[1]], "treeppl", TPPLC_VERSION)
+}
+
+#' Download the associated version of TreePPL
+#'
+#' @description
+#' `.fetch_treeppl()` downloads the self-contained TreePPL release matching
+#' `TPPLC_VERSION` for the current platform (Linux or macOS). Windows is not
+#' supported and must be handled by the caller.
+#'
+#' @param keep_previous Logical. If `FALSE`, the `treeppl` directory is deleted
+#'   before downloading, removing any other stored version.
+#'
+#' @return The path to the downloaded tarball (invisibly).
+#' @noRd
+.fetch_treeppl <- function(keep_previous = FALSE) {
+  platform <- if (Sys.info()[["sysname"]] == "Linux") {
+    "x86_64-linux"
+  } else {
+    "aarch64-darwin"
+  }
+  file_name <- paste0("treeppl-", TPPLC_VERSION, "-", platform, ".tar.gz")
+  url <- paste0(
+    "https://github.com/treeppl/treeppl/releases/download/v",
+    TPPLC_VERSION, "/", file_name
+  )
+
+  install_dir <- .install_dir()
+  if (!keep_previous) {
+    unlink(dirname(install_dir), recursive = TRUE)
+  }
+  dir.create(install_dir, recursive = TRUE, showWarnings = FALSE)
+
+  destfile <- file.path(install_dir, file_name)
+  curl::curl_download(url, destfile = destfile, quiet = FALSE)
+
+  invisible(destfile)
+}
+
+#' Find model or data files in the TreePPL model library
+#'
+#' @description
+#' `.find()` locates `.tppl` model files or `.json` data files in the TreePPL
+#' model library. The library is taken from the `MCORE_LIBS` environment
+#' variable if set, otherwise from the self-contained TreePPL installation.
+#'
+#' @param type Either `"model"` (`.tppl` files) or `"data"` (`.json` files).
+#' @param model_name Name of the model, without extension (treated as a regular
+#'   expression). If `NULL`, all files of the given `type` are returned.
+#'
+#' @return A character vector of file paths.
+#' @noRd
+.find <- function(type = c("model", "data"), model_name = NULL) {
+  type <- match.arg(type)
+  ext <- if (type == "model") "tppl" else "json"
+  name <- if (is.null(model_name)) ".*" else model_name
+  pattern <- paste0("^", name, "\\.", ext, "$")
+
+  # if MCORE_LIBS is set in ~/.Renviron
+  mcore_libs <- Sys.getenv("MCORE_LIBS")
+  if (grepl("treeppl=", mcore_libs)) {
+    root <- sub(":.*$", "", sub(".*treeppl=", "", mcore_libs))
+  } else {
+    # root of the unpacked installation
+    root <- dirname(tp_installing_treeppl())
+    root <- list.files(root, pattern = "treeppl", full.names = TRUE)
+    root <- paste0(root, "/lib/mcore/treeppl/models")
+  }
+
+  # search the whole root and keep files located inside a "models" directory
+  paths <- list.files(
+    path = root,
+    pattern = pattern,
+    recursive = TRUE,
+    full.names = TRUE
+  )
+  paths[grepl("/models/", paths, fixed = TRUE)]
+}
+
+#' Print the model library in the console
+#'
+#' Internal helper that prints the output of [tp_model_library()] grouped by
+#' category, with each model name highlighted.
+#'
+#' @param x A data frame with columns `category` and `model_name`, as returned
+#'   by [tp_model_library()].
+#'
+#' @return `NULL`, invisibly. Called for its side effect of printing to the
+#'   console.
+#'
+#' @noRd
+.print_model_library <- function(x) {
+  cli::cli_div(theme = list(span.field = list(color = "green")))
+
+  for (category in unique(x$category)) {
+    models <- x$model_name[x$category == category]
+
+    cli::cli_h2("{category}")
+    cli::cli_ul()
+    for (m in models) {
+      cli::cli_li("{.field {m}}")
+    }
+    cli::cli_end()
+  }
+
+  cli::cli_end()
+}
+
+#' Print method for `tp_model_library` objects
+#'
+#' Prints the model library as a categorized, color-highlighted list instead
+#' of a plain data frame.
+#'
+#' @param x An object of class `tp_model_library`.
+#' @param ... Not used.
+#'
+#' @return `x`, invisibly.
+#'
+#' @export
+#' @noRd
+print.tp_model_library <- function(x, ...) {
+  .print_model_library(x)
+  invisible(x)
+}
+

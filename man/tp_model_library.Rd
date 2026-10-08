@@ -2,13 +2,16 @@
 % Please edit documentation in R/utils.R
 \name{tp_model_library}
 \alias{tp_model_library}
-\title{Model names supported by treepplr}
+\title{Models implemented in treepplr}
 \usage{
 tp_model_library()
 }
 \value{
-A list of model names.
+A data frame of class \code{tp_model_library} with columns \code{category}
+and \code{model_name}, ordered by category and then by model name. Printing
+the object shows the models grouped by category. It can still be subset
+like a regular data frame, for example \code{tp_model_library()$model_name}.
 }
 \description{
-Provides a list of all models in the TreePPL model library.
+\code{tp_model_library()} lists all models in the TreePPL model library.
 }

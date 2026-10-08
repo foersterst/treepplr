@@ -7,16 +7,16 @@
 tp_list(...)
 }
 \arguments{
-\item{...}{Variadic arguments (see details).}
+\item{...}{Either independent arguments (\code{name = value}), or a single
+structured list.}
 }
 \value{
 A list.
 }
 \description{
-\code{tp_list} takes a variable number of arguments and returns a list.
+\code{tp_list()} takes a variable number of arguments and returns a list.
 }
 \details{
-This function takes a variable number of arguments, so that users can pass as
-arguments either independent lists, or a single structured
-list of list (name_arg = value_arg).
+If a single list is supplied, it is returned as is, so that users can pass
+either several arguments or one list of arguments.
 }

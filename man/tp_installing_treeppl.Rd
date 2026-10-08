@@ -2,21 +2,32 @@
 % Please edit documentation in R/utils.R
 \name{tp_installing_treeppl}
 \alias{tp_installing_treeppl}
-\title{Platform-dependent treeppl self-contained installation}
+\title{Platform-dependent TreePPL self-contained installation}
 \usage{
 tp_installing_treeppl(download = TRUE, keep_previous = FALSE)
 }
 \arguments{
-\item{download}{Will download the associate tpplc version in the dir next
-to your local treepplr installation if not present.}
+\item{download}{Logical. Download the associated \code{tpplc} version if it is not
+present locally.}
 
-\item{keep_previous}{Will download the associate tpplc version in the dir next
-to your local treepplr installation if not present.}
+\item{keep_previous}{Logical. Keep previously downloaded \code{tpplc} versions
+instead of deleting them before the new download.}
 }
 \value{
-The path for TreePPL compiler.
+The path to the TreePPL compiler.
 }
 \description{
-\code{tp_installing_treeppl} will search for the local version tpplc associate
-with the package. Will download it if it's not detected on the computer.
+\code{tp_installing_treeppl()} looks for the \code{tpplc} compiler associated with the
+package and, if it is not found, downloads and unpacks it.
+}
+\details{
+The search order is:
+\enumerate{
+\item the \code{TPPLC} environment variable;
+\item on Windows, a manual installation of \code{tpplc} (no self-contained build is
+available);
+\item an already unpacked copy in \verb{/tmp};
+\item a downloaded tarball in the \code{treeppl} directory next to the local
+treepplr installation (downloaded first if \code{download = TRUE}).
+}
 }

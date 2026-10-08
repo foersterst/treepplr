@@ -34,7 +34,8 @@ Imports:
     dplyr,
     coda,
     crayon,
-    tidyr
+    tidyr,
+    cli
 Suggests:
     devtools,
     ggplot2,

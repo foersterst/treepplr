@@ -356,7 +356,7 @@ tp_list <- function(...) {
 }
 
 
-# Printing Functions ----------------------------------------------------------------
+# Printing Methods ----------------------------------------------------------------
 
 #' Print method for `tp_model_library` objects
 #'

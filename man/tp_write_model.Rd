@@ -2,18 +2,18 @@
 % Please edit documentation in R/model.R
 \name{tp_write_model}
 \alias{tp_write_model}
-\title{Write out a custom model to tp_tempdir()}
+\title{Write a custom model to tp_tempdir()}
 \usage{
 tp_write_model(model, model_file_name = "tmp_model_file")
 }
 \arguments{
 \item{model}{A string containing the entire TreePPL code.}
 
-\item{model_file_name}{An optional name to the file created}
+\item{model_file_name}{Name of the file to create, without extension.}
 }
 \value{
-The path to the file created
+The path to the file created.
 }
 \description{
-Write out a custom model to tp_tempdir()
+\code{tp_write_model()} writes TreePPL code to a \code{.tppl} file in \code{\link[=tp_tempdir]{tp_tempdir()}}.
 }

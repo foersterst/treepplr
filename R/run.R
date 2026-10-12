@@ -92,7 +92,7 @@ tp_run <- function(
   #> lis <- list(method = "mcmc", method = "smc")
   #> lis[["method"]] => "mcmc"
   # So the user list have priority
-  tpplc_options <- list_to_options(tp_list(...))
+  tpplc_options <- .list_to_options(tp_list(...))
 
   if (length(tpplc_options[["compile"]]) != 0) {
     stop("Can't give compile time options here")
@@ -103,7 +103,7 @@ tp_run <- function(
     "LD_LIBRARY_PATH= ",
     sampler$exe_path,
     data,
-    options_to_string(tpplc_options[["runtime"]]),
+    .options_to_string(tpplc_options[["runtime"]]),
     paste(">", output_path)
   )
 
@@ -121,7 +121,7 @@ tp_run <- function(
           "LD_LIBRARY_PATH= ",
           sampler$exe_path,
           data,
-          options_to_string(tpplc_options[["runtime"]]),
+          .options_to_string(tpplc_options[["runtime"]]),
           paste(">", output_path_i)
         )
         system(command_i)

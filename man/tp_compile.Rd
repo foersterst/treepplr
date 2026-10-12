@@ -2,28 +2,32 @@
 % Please edit documentation in R/model.R
 \name{tp_compile}
 \alias{tp_compile}
-\title{Create a TreePPL model}
+\title{Build a TreePPL sampler for a given model and inference method}
 \usage{
 tp_compile(model, method = "mcmc", ...)
 }
 \arguments{
-\item{model}{One of tree options:
+\item{model}{One of three options:
 \itemize{
-\item The full path of the model file that contains the TreePPL code, OR
+\item The full path of a JSON file that contains the TreePPL code, OR
 \item A string with the name of a model supported by treepplr
 (see \code{\link[=tp_model_library]{tp_model_library()}}), OR
 \item A string containing the entire TreePPL code.
 }}
 
-\item{method}{Inference method to be used. See \code{\link[=tp_compile_methods]{tp_compile_methods()}}
-for all supported methods.}
+\item{method}{Inference method to be used. See
+\code{tp_treeppl_options("methods")} for all supported methods.}
 
-\item{...}{See \code{\link[=tp_compile_options]{tp_compile_options()}} for all supported arguments.}
+\item{...}{Compile and runtime options. See
+\code{tp_treeppl_options("compile")} and \code{tp_treeppl_options("runtime")} for all
+supported arguments. Names are written without \verb{--}, and underscores are
+converted to hyphens (e.g., \code{no_early_stop = TRUE} becomes
+\code{--no-early-stop}).}
 }
 \value{
-sampler from a sampler_T
+A TreePPL sampler object (class \code{tppls}).
 }
 \description{
-\code{tp_compile} takes TreePPL model and create a sampler to be used by
+\code{tp_compile()} compiles a TreePPL model and creates a sampler to be used by
 \code{\link[=tp_run]{tp_run()}}.
 }

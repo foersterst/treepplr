@@ -247,6 +247,117 @@ tp_list <- function(...) {
   cli::cli_end()
 }
 
+#' Set the environment variables TreePPL needs, if the intention is to avoid using
+#' the self-contained TreePPL.
+#'
+#' Looks for the `tpplc` compiler and the `MCORE_LIBS` variable and sets
+#' `TPPLC` and `MCORE_LIBS` for the current R session. Works on macOS and Linux.
+#'
+#' @param overwrite Logical. Replace variables that are already set?
+#'
+#' @return A named list with the values set, invisibly.
+#' @noRd
+.set_envs <- function(overwrite = FALSE) {
+  if (.Platform$OS.type == "windows") {
+    cli::cli_abort("{.fn set_tp_envs} supports macOS and Linux only.")
+  }
+
+  # Ask the user's login shell, which has the same environment as Terminal
+  shell_env <- function() {
+    shells <- unique(c(
+      Sys.getenv("SHELL"),
+      unname(Sys.which(c("zsh", "bash", "fish")))
+    ))
+    shells <- shells[shells != "" & file.exists(shells)]
+
+    query <- function(shell) {
+      out <- tryCatch(
+        suppressWarnings(
+          system2(
+            shell, c("-l", "-i", "-c", "env"),
+            stdout = TRUE,
+            stderr = FALSE,
+            timeout = 10
+          )
+        ),
+        error = function(e) character()
+      )
+
+      get_var <- function(var) {
+        pattern <- paste0("^", var, "=")
+        line <- grep(pattern, out, value = TRUE)
+        if (length(line) == 0) "" else sub(pattern, "", line[1])
+      }
+
+      dirs <- strsplit(get_var("PATH"), ":", fixed = TRUE)[[1]]
+      candidates <- file.path(dirs, "tpplc")
+      tpplc <- candidates[file.exists(candidates)][1]
+
+      list(tpplc = if (is.na(tpplc)) "" else tpplc, mcore = get_var("MCORE_LIBS"))
+    }
+
+    result <- list(tpplc = "", mcore = "")
+    for (shell in shells) {
+      res <- query(shell)
+      if (result$tpplc == "") result$tpplc <- res$tpplc
+      if (result$mcore == "") result$mcore <- res$mcore
+      if (result$tpplc != "" && result$mcore != "") break
+    }
+    result
+  }
+
+  already_set <- function(var) Sys.getenv(var) != ""
+  sh <- NULL # query the shell only if needed
+
+  # TPPLC
+  if (overwrite || !already_set("TPPLC")) {
+    path <- unname(Sys.which("tpplc"))
+    if (path == "") {
+      sh <- shell_env()
+      path <- sh$tpplc
+    }
+    if (path == "" || !file.exists(path)) {
+      path <- file.path(Sys.getenv("HOME"), ".local", "bin", "tpplc")
+    }
+    if (file.exists(path)) {
+      Sys.setenv(TPPLC = path)
+    } else {
+      cli::cli_warn(c(
+        "Could not find {.code tpplc}.",
+        "i" = "Set it manually: {.code Sys.setenv(TPPLC = \"/path/to/tpplc\")}"
+      ))
+    }
+  }
+
+  # MCORE_LIBS
+  if (overwrite || !already_set("MCORE_LIBS")) {
+    if (is.null(sh)) sh <- shell_env()
+    if (sh$mcore != "") {
+      Sys.setenv(MCORE_LIBS = sh$mcore)
+    } else {
+      cli::cli_warn(c(
+        "Could not find {.envvar MCORE_LIBS} in your shell.",
+        "i" = "Set it manually with {.code Sys.setenv(MCORE_LIBS = \"...\")}"
+      ))
+    }
+  }
+
+  result <- list(
+    TPPLC = Sys.getenv("TPPLC"),
+    MCORE_LIBS = Sys.getenv("MCORE_LIBS")
+  )
+
+  cli::cli_dl(c(
+    TPPLC = ifelse(result$TPPLC == "", "{.emph not set}", "{.path {result$TPPLC}}"),
+    MCORE_LIBS = ifelse(result$MCORE_LIBS == "", "{.emph not set}", "set")
+  ))
+
+  invisible(result)
+}
+
+
+# Printing Functions ----------------------------------------------------------------
+
 #' Print method for `tp_model_library` objects
 #'
 #' Prints the model library as a categorized, color-highlighted list instead
@@ -263,4 +374,10 @@ print.tp_model_library <- function(x, ...) {
   .print_model_library(x)
   invisible(x)
 }
+
+
+
+
+
+
 

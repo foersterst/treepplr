@@ -195,7 +195,7 @@ tp_list <- function(...) {
   type <- match.arg(type)
   ext <- if (type == "model") "tppl" else "json"
   name <- if (is.null(model_name)) ".*" else model_name
-  pattern <- paste0("^", name, "\\.", ext, "$")
+  pattern <- paste0(name, "\\.", ext, "$")
 
   # if MCORE_LIBS is set in ~/.Renviron
   mcore_libs <- Sys.getenv("MCORE_LIBS")

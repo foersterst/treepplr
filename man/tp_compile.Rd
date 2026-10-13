@@ -18,11 +18,12 @@ tp_compile(model, method = "mcmc", ...)
 \item{method}{Inference method to be used. See
 \code{tp_treeppl_options("methods")} for all supported methods.}
 
-\item{...}{Compile and runtime options. See
-\code{tp_treeppl_options("compile")} and \code{tp_treeppl_options("runtime")} for all
-supported arguments. Names are written without \verb{--}, and underscores are
-converted to hyphens (e.g., \code{no_early_stop = TRUE} becomes
-\code{--no-early-stop}).}
+\item{...}{Compile options, as \code{name = value} pairs or a single list (see
+\code{\link[=tp_list]{tp_list()}}). See \code{tp_treeppl_options("compile")} for all supported
+arguments. Names are written without \verb{--}, and underscores are converted to
+hyphens (e.g., \code{incremental_printing = TRUE} becomes
+\code{--incremental-printing}). Runtime options are not allowed here; pass them
+to \code{\link[=tp_run]{tp_run()}} instead.}
 }
 \value{
 A TreePPL sampler object (class \code{tppls}).
@@ -30,4 +31,14 @@ A TreePPL sampler object (class \code{tppls}).
 \description{
 \code{tp_compile()} compiles a TreePPL model and creates a sampler to be used by
 \code{\link[=tp_run]{tp_run()}}.
+}
+\examples{
+\dontrun{
+sampler <- tp_compile(
+  model = "crbd",
+  method = "smc-bpf",
+  resample = "align",
+  prune = TRUE
+)
+}
 }

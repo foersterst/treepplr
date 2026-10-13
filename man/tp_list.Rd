@@ -2,21 +2,53 @@
 % Please edit documentation in R/utils.R
 \name{tp_list}
 \alias{tp_list}
-\title{Create a flat list}
+\title{Collect TreePPL options in a list}
 \usage{
 tp_list(...)
 }
 \arguments{
-\item{...}{Either independent arguments (\code{name = value}), or a single
-structured list.}
+\item{...}{Either separate arguments (\code{name = value}), or a single list of
+such arguments.}
 }
 \value{
-A list.
+A named list of options.
 }
 \description{
-\code{tp_list()} takes a variable number of arguments and returns a list.
+\code{tp_list()} collects options given either as separate \code{name = value}
+arguments or as a single list, and returns them as one named list. It is
+how \code{\link[=tp_compile]{tp_compile()}} and \code{\link[=tp_run]{tp_run()}} read their \code{...}, so both functions accept
+either form. Use it directly to build a set of options once and reuse it.
 }
 \details{
-If a single list is supplied, it is returned as is, so that users can pass
-either several arguments or one list of arguments.
+Option names are the \code{tpplc} flags without the leading \verb{--}, as listed by
+\code{\link[=tp_treeppl_options]{tp_treeppl_options()}}. Hyphens may be written as underscores
+(\code{subsample_size} for \code{--subsample-size}). The value sets how the flag is
+passed to \code{tpplc}:
+\itemize{
+\item \code{name = value} (a number or a string) gives \verb{--name value};
+\item \code{name = TRUE} gives \code{--name}, for flags without a value;
+\item \code{name = FALSE} or \code{name = NULL} leaves the flag out.
+}
+
+If a single list is supplied, it is returned as is. A list can't be combined
+with other arguments: use \code{c(opts, seed = 42)} instead of \verb{opts, seed = 42}.
+}
+\examples{
+# separate arguments
+tp_list(particles = 1000, subsample = TRUE, subsample_size = 10)
+
+# a single list gives the same result
+opts <- list(particles = 1000, subsample = TRUE, subsample_size = 10)
+identical(tp_list(opts), tp_list(particles = 1000, subsample = TRUE, subsample_size = 10))
+
+\dontrun{
+# reuse the same runtime options for several runs
+run_opts <- tp_list(particles = 1000, sweeps = 2)
+sampler <- tp_compile(model = "crbd", method = "smc-bpf")
+data_path <- tp_data(data_input = "crbd")
+result_1 <- tp_run(sampler, data_path, run_opts)
+
+# to add options, extend the list (a list can't be mixed with other arguments)
+result_2 <- tp_run(sampler, data_path, c(run_opts, seed = 42))
+}
 }

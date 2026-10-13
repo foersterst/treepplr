@@ -103,20 +103,50 @@ tp_model_library <- function() {
   library
 }
 
-#' Create a flat list
+#' Collect TreePPL options in a list
 #'
 #' @description
-#' `tp_list()` takes a variable number of arguments and returns a list.
+#' `tp_list()` collects options given either as separate `name = value`
+#' arguments or as a single list, and returns them as one named list. It is
+#' how [tp_compile()] and [tp_run()] read their `...`, so both functions accept
+#' either form. Use it directly to build a set of options once and reuse it.
 #'
-#' @param ... Either independent arguments (`name = value`), or a single
-#'   structured list.
+#' @param ... Either separate arguments (`name = value`), or a single list of
+#'   such arguments.
 #'
 #' @details
-#' If a single list is supplied, it is returned as is, so that users can pass
-#' either several arguments or one list of arguments.
+#' Option names are the `tpplc` flags without the leading `--`, as listed by
+#' [tp_treeppl_options()]. Hyphens may be written as underscores
+#' (`subsample_size` for `--subsample-size`). The value sets how the flag is
+#' passed to `tpplc`:
+#' * `name = value` (a number or a string) gives `--name value`;
+#' * `name = TRUE` gives `--name`, for flags without a value;
+#' * `name = FALSE` or `name = NULL` leaves the flag out.
 #'
-#' @return A list.
+#' If a single list is supplied, it is returned as is. A list can't be combined
+#' with other arguments: use `c(opts, seed = 42)` instead of `opts, seed = 42`.
+#'
+#' @return A named list of options.
 #' @export
+#'
+#' @examples
+#' # separate arguments
+#' tp_list(particles = 1000, subsample = TRUE, subsample_size = 10)
+#'
+#' # a single list gives the same result
+#' opts <- list(particles = 1000, subsample = TRUE, subsample_size = 10)
+#' identical(tp_list(opts), tp_list(particles = 1000, subsample = TRUE, subsample_size = 10))
+#'
+#' \dontrun{
+#' # reuse the same runtime options for several runs
+#' run_opts <- tp_list(particles = 1000, sweeps = 2)
+#' sampler <- tp_compile(model = "crbd", method = "smc-bpf")
+#' data_path <- tp_data(data_input = "crbd")
+#' result_1 <- tp_run(sampler, data_path, run_opts)
+#'
+#' # to add options, extend the list (a list can't be mixed with other arguments)
+#' result_2 <- tp_run(sampler, data_path, c(run_opts, seed = 42))
+#' }
 tp_list <- function(...) {
   args <- list(...)
 

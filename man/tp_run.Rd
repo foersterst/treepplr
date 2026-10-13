@@ -16,65 +16,56 @@ tp_run(
 )
 }
 \arguments{
-\item{sampler}{a sampler produced by \code{tp_compile()}.}
+\item{sampler}{A TreePPL sampler (class \code{tppls}), produced by \code{\link[=tp_compile]{tp_compile()}}.}
 
-\item{data}{input data, produced by \code{tp_data()}.}
+\item{data}{Path to the input data, produced by \code{\link[=tp_data]{tp_data()}}.}
 
-\item{dir}{the full path to the directory where
-you want to save the output. Defaults to \code{tp_tempdir()}.}
+\item{dir}{Path to the directory where the output is saved. If \code{NULL}, uses
+\code{\link[=tp_tempdir]{tp_tempdir()}}.}
 
-\item{out_file_name}{the name of the output file in JSON format. Defaults to \code{"out"}.}
+\item{out_file_name}{Name of the output file, without extension. With more
+than one run, the run number is appended (e.g., \code{out1.json}, \code{out2.json}).}
 
-\item{n_runs}{(\code{integer}) the number of sweeps (SMC) or runs
-(MCMC).}
+\item{n_runs}{Number of independent runs of the sampler.}
 
-\item{n_processes}{(\code{integer}) the number of parallel processes to use.
-Cannot be greater than \code{n_runs}.}
+\item{n_processes}{Number of parallel processes used when \code{n_runs > 1}. It is
+capped at \code{n_runs}.}
 
-\item{verbose}{(\code{logical}) Whether to print a run summary on completion.
-Default is \code{TRUE}.}
+\item{verbose}{Logical. Print a run summary on completion?}
 
-\item{...}{See \code{\link[=tp_runtime_options]{tp_runtime_options()}} for all supported arguments.}
+\item{...}{Runtime options, as \code{name = value} pairs or a single list (see
+\code{\link[=tp_list]{tp_list()}}). See \code{tp_treeppl_options("runtime")} for all supported
+arguments. Names are written without \verb{--}, and underscores are converted to
+hyphens (e.g., \code{subsample_size = 10} becomes \verb{--subsample-size 10}).
+Compile options are not allowed here; pass them to \code{\link[=tp_compile]{tp_compile()}} instead.}
 }
 \value{
-If a parser is available for the model/method combination, a parsed
-tidy data frame of TreePPL output via \code{tp_parse_smc()} or \code{tp_parse_mcmc()}.
-Otherwise, the full path(s) to the raw JSON output file(s),
-along with a console message explaining that no parser is available.
+If a parser is available, a workable R object (usually a tidy data frame,
+a list, or an object of class \code{phylo}, depending on the model).
 }
 \description{
-Executes a compiled TreePPL sampler on the given data, saves the raw JSON
-output to disk, prints a run summary, and, when a parser is available for
-the model/method combination, parses the output into tidy data frames.
+\code{tp_run()} executes a compiled TreePPL sampler on the given data, saves the
+raw JSON output to disk, prints a run summary and, when a parser is available
+for the model/method combination, imports the output to the current R session.
 }
 \details{
+Previous output files with the same \code{out_file_name} in \code{dir} are deleted
+before running.
+
 If the model belongs to a category without an available parser (e.g.
 \code{"host-repertoire-evolution"}, \code{"tree-inference"}), or if the inference
-method is neither SMC nor MCMC, no parsing is attempted: a message is
-printed pointing to the output directory, and the raw output file path(s)
-are returned instead.
+method is neither SMC nor MCMC, no parsing is attempted: a message points to
+the output directory and the paths of the raw output files are returned.
 }
 \examples{
 \dontrun{
-# When using SMC
-# compile model and create SMC inference machinery
-exe_path <- tp_compile(model = "coin", method = "smc-bpf", particles = 2000)
-
-# prepare data
+# SMC
+sampler <- tp_compile(model = "coin", method = "smc-bpf")
 data_path <- tp_data(data_input = "coin")
+result <- tp_run(sampler, data_path, particles = 2000, n_runs = 2)
 
-# run TreePPL
-result <- tp_run(exe_path, data_path, n_runs = 2)
-
-
-# When using MCMC
-# compile model and create MCMC inference machinery
-exe_path <- tp_compile(model = "coin", method = "mcmc-naive", iterations = 2000)
-
-# prepare data
-data_path <- tp_data(data_input = "coin")
-
-# run TreePPL
-result <- tp_run(exe_path, data_path)
+# MCMC, with runtime options given as a list
+sampler <- tp_compile(model = "coin", method = "mcmc-naive")
+result <- tp_run(sampler, data_path, tp_list(iterations = 2000))
 }
 }

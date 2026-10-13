@@ -28,10 +28,10 @@
 #'   data = tp_data(data_input = "crbd"),
 #'   sampler = tp_compile(
 #'     model = "crbd",
-#'     method = "smc-apf",
-#'     sweeps = 2,
-#'     particles = 10
-#'   )
+#'     method = "smc-apf"
+#'   ),
+#'   sweeps = 2,
+#'   particles = 10
 #' )
 #'
 #' # get the path to the output JSON file:
@@ -183,8 +183,9 @@ tp_parse_smc <- function(json_path, wide = TRUE) {
 #'
 #' # Let's use a quick CRBD model as example
 #' run_mcmc <- tp_run(
-#' sampler = tp_compile(model = "crbd", method = "mcmc", iterations = 10),
+#' sampler = tp_compile(model = "crbd", method = "mcmc"),
 #' data = tp_data(data_input = "crbd"),
+#' iterations = 10,
 #' n_runs = 2, # this will produce two JSON files as output
 #' n_processes = 2
 #' )
@@ -504,8 +505,9 @@ tp_smc_convergence <- function(treeppl_out) {
 #'
 #' # CRBD model using MCMC
 #' run_mcmc <- tp_run(
-#' sampler = tp_compile(model = "crbd", method = "mcmc", iterations = 10),
+#' sampler = tp_compile(model = "crbd", method = "mcmc"),
 #' data = tp_data(data_input = "crbd"),
+#' iterations = 10,
 #' n_runs = 2,
 #' n_processes = 2
 #' )

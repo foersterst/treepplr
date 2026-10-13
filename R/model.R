@@ -214,19 +214,23 @@ tp_compile <- function(model, method = "mcmc", ...) {
 #' environment of the self-contained TreePPL.
 #'
 #' @param args Character vector of arguments passed to `tpplc`.
-#' @param stdout Passed to [base::system2()]; use `TRUE` to capture the output.
+#' @param stdout,stderr Passed to [base::system2()]; use `TRUE` to capture the
+#'   output. When output is captured, a non-zero exit status is returned as the
+#'   `status` attribute of the captured lines (and the [base::system2()] warning
+#'   is suppressed).
 #'
-#' @return The captured output if `stdout = TRUE`, otherwise the exit status
-#' (invisibly).
+#' @return The captured output if `stdout` or `stderr` is `TRUE`, otherwise the
+#'   exit status (invisibly).
 #'
 #' @noRd
-.tpplc <- function(args, stdout = "") {
-  system2(
+.tpplc <- function(args, stdout = "", stderr = "") {
+  suppressWarnings(system2(
     command = tp_installing_treeppl(),
     args = args,
     env = "LD_LIBRARY_PATH=",
-    stdout = stdout
-  )
+    stdout = stdout,
+    stderr = stderr
+  ))
 }
 
 #' TreePPL inference methods and options as a data frame
@@ -345,16 +349,35 @@ tp_compile <- function(model, method = "mcmc", ...) {
 #'
 #' @param path Path to a TreePPL model file.
 #' @param args_str String with the options for the TreePPL compiler.
+#' @param call Environment used in the error message if compilation fails.
 #'
 #' @return The path to the compiled TreePPL program.
 #' @noRd
-.compilation <- function(path, args_str) {
+.compilation <- function(path, args_str, call = rlang::caller_env()) {
   hash <- digest::digest(paste(path, args_str), algo = "sha256")
   output_path <- paste0(tp_tempdir(), hash, ".exe")
 
-  status <- .tpplc(c(args_str, "--output", shQuote(output_path), shQuote(path)))
-  if (status != 0L) {
-    stop("Compilation failed")
+  output <- .tpplc(
+    c(args_str, "--output", shQuote(output_path), shQuote(path)),
+    stdout = TRUE,
+    stderr = TRUE
+  )
+  status <- attr(output, "status")
+  # the output is shown as-is, so braces must not be read as cli interpolation
+  message <- gsub("}", "}}", gsub("{", "{{", output, fixed = TRUE), fixed = TRUE)
+  names(message) <- rep(" ", length(message))
+
+  if (!is.null(status) && status != 0L) {
+    cli::cli_abort(c(
+      "Compilation failed: {.code tpplc} exited with status {status}.",
+      "i" = "Command: {.code tpplc {args_str}}",
+      if (length(message) > 0) c("x" = "{.code tpplc} said:", message)
+    ), call = call)
+  }
+
+  # compiler messages are captured above, so they are shown here instead
+  if (length(message) > 0) {
+    cli::cli_inform(message)
   }
 
   output_path

@@ -12,13 +12,38 @@ options and runtime options), \code{"methods"}, \code{"compile"} or \code{"runti
 }
 \value{
 A data frame with columns \code{type} (\code{"methods"}, \code{"compile"} or
-\code{"runtime"}), \code{argument} and \code{description} (invisibly). For methods,
-\code{argument} is the method name (e.g., \code{"mcmc"}); for options, it is the flag
-(e.g., \code{"--particles"}).
+\code{"runtime"}), \code{argument}, \code{value} and \code{description} (invisibly). For
+methods, \code{argument} is the method name (e.g., \code{"mcmc"}) and \code{value} is
+\code{NA}; for options, \code{argument} is the argument name (e.g.,
+\code{"subsample_size"}) and \code{value} the type of value expected: \code{"integer"},
+\code{"number"}, \code{"string"} or \code{"logical"} (flags without a value).
 }
 \description{
 \code{tp_treeppl_options()} reads the inference methods and options supported by
 the TreePPL compiler (\code{tpplc --help}) and displays them in the console.
 Inference methods are passed to the \code{method} argument of \code{\link[=tp_compile]{tp_compile()}},
-compile options to the \code{...} of \code{\link[=tp_compile]{tp_compile()}}, and runtime options to \code{\link[=tp_run]{tp_run()}}.
+compile options to the \code{...} of \code{\link[=tp_compile]{tp_compile()}}, and runtime options to the
+\code{...} of \code{\link[=tp_run]{tp_run()}}.
+}
+\details{
+Options are shown in the form accepted by \code{\link[=tp_compile]{tp_compile()}} and \code{\link[=tp_run]{tp_run()}},
+with the type of value they expect. The type is translated from the
+placeholder used in \code{tpplc --help}:
+\itemize{
+\item \code{INT} or \code{N}: \verb{<integer>}, e.g. \verb{--subsample-size INT} is shown as
+\verb{subsample_size = <integer>};
+\item \code{FLOAT}: \verb{<number>};
+\item any other placeholder (\code{ARG}, \code{FILE}, \verb{<option>}, ...): \verb{<string>};
+\item no placeholder (a flag without a value): \verb{<logical>}, e.g.
+\verb{subsample = <logical>}. Use \code{TRUE} to set the flag.
+}
+}
+\examples{
+\dontrun{
+tp_treeppl_options("runtime")
+
+# the returned data frame can be searched
+opts <- tp_treeppl_options("compile")
+opts[grepl("resample", opts$argument), ]
+}
 }

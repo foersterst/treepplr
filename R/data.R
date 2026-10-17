@@ -1,484 +1,565 @@
+# Exported Functions -----------------------------------------------------------
 
-
-
-
-
-#' Import data for TreePPL program
+#' List the input arguments a TreePPL model expects
 #'
-#' @description
-#' Prepare data input for [treepplr::tp_run()].
+#' Scans a `.tppl` file, finds its `model function` signature and reports the
+#' name of every input argument together with the R object you should supply
+#' for it. The result is printed to the console and also returned, invisibly,
+#' so it can be stored and reused (for example to check a data list before
+#' writing it to JSON).
 #'
-#' @param data_input One of the following options:
-#'   * A named list (or structured list) containing TreePPL data, OR
-#'   * The full path of a multiple sequence alignment in fasta (.fasta, .fas)
-#'   or nexus (.nexus, .nex) format, OR
-#'   * For test data, a string with the name of a model supported by treepplr
-#' (see [treepplr::tp_model_library()]).
-#' @param data_file_name An optional name for the file created. Ignored if `data_input`
-#' is the name of a model from the TreePPL library.
-#' @param dir The directory where you want to save the data file in JSON format.
-#' Default is [base::tempdir()]. Ignored if `data_input` is the name of a model
-#' from the TreePPL library.
+#' TreePPL types are translated to R objects as follows:
 #'
-#' @return The path for the data file that will be used by [treepplr::tp_run()].
+#' | TreePPL type                      | R object            |
+#' |-----------------------------------|---------------------|
+#' | `Real`                            | numeric             |
+#' | `Int`                             | integer             |
+#' | `Bool`                            | logical             |
+#' | `String`                          | character           |
+#' | `Real[]`, `Int[]`, ...            | numeric vector, ... |
+#' | `Real[][]`, `Int[][]`, ...        | numeric matrix, ... |
+#' | `Matrix[Real]`                    | matrix              |
+#' | any recursive tree type           | phylo               |
+#' | anything else (e.g. record types) | the TreePPL type    |
 #'
-#' @details
-#' `data_input`: The name of each list element has to match the name of a model
-#' input, which is defined in the TreePPL model code.
+#' A type counts as a tree when it is `ClockTree` (TreePPL's built-in tree),
+#' an alias of a tree type, or a type defined in the model file (or in a file
+#' it imports with a relative path) whose fields refer to the type itself,
+#' e.g. `Node {left: Tree, right: Tree, age: Real}`.
+#'
+#' @param tppl Path to a `.tppl` model file.
+#'
+#' @return Invisibly, a list of class `tpEdata` with elements:
+#'   * `model_file`: the path given in `tppl`.
+#'   * `model_name`: the model's name, i.e. the file name without `.tppl`
+#'     (`"qt"` for `qt.tppl`).
+#'   * `model_function`: the name of the `model function` inside the file,
+#'     which can differ from `model_name` (`"qtbirds"` in `qt.tppl`).
+#'   * `expect_args`: character vector of argument names, in signature order.
+#'   * `expect_types`: character vector of the TreePPL type of each argument.
+#'   * `expect_class`: character vector of the matching R object.
+#'
+#'   Models without arguments return zero-length vectors.
+#'
+#' @seealso [print.tpEdata()] for the console output.
 #'
 #' @export
+#'
 #' @examples
 #' \dontrun{
-#' # Example using a model name supported by TreePPL
-#' input <- tp_data("tree_inference")
-#' input
+#' tp_expected_input(tppl = "models/diversification/clads2.tppl")
 #'
-#' # Example using an internal FASTA file (same input data as before, but in fasta format)
-#' fasta_file <- system.file("extdata", "tree_inference.fasta", package = "treepplr")
-#' input <- tp_data(fasta_file)
-#' input
+#' k <- tp_expected_input(tppl = "models/diversification/clads2.tppl")
+#' k$expect_args
+#' #> [1] "tree" "rho"
 #' }
-#'
-tp_data <- function(data_input,
-                    data_file_name = "tmp_data_file",
-                    dir = tp_tempdir()) {
-  #### TODO data inputs have to be named as it is expected in the model ####
-
-  if (assertthat::is.string(data_input)) {
-    if (grepl("\\.(fasta|fas|nexus|nex)$", data_input, ignore.case = TRUE)) {
-      data <- read_aln(data_input)
-      data_list <- tp_list(list(data))
-      data_path <- tp_write_data(data_list, data_file_name, dir)
-
-    } else {
-      res_lib <- tp_find_data(data_input)
-
-      # model_input has the name of a known model
-      if (length(res_lib) != 0) {
-        data_path <- res_lib
-
-      } else {
-        stop("Invalid input string.")
-      }
-    }
-
-    # OR data_input is a list (or a structured list)
-  } else if (is.list(data_input)) {
-    # flatten the list
-    data_list <- tp_list(data_input)
-    # write json with input data
-    data_path <- tp_write_data(data_list, data_file_name, dir)
-  } else {
-    stop("Unknow R type (not a valid path, known data model, or list")
+tp_expected_input <- function(tppl) {
+  # if model name rather than a path is supplied, look into the model library
+  if (!file.exists(tppl)) {
+    filename <- basename(tppl)
+    tppl <- .find(type = "model", model_name = tppl)
+  }
+  if (length(tppl) == 0) {
+    cli::cli_abort("Can't find the file {.file {filename}}.")
   }
 
-  return(data_path)
+  code <- .read_tppl_code(tppl)
+  signature <- .parse_model_signature(code, tppl)
+  tree_types <- .find_tree_types(tppl)
 
-}
-
-#' Write data to file
-#'
-#' @param data_list A named list of data input
-#' @param data_file_name An optional name for the file created
-#' @param dir The directory where you want to save the data file in JSON format.
-#' Default is [base::tempdir()].
-#'
-#' @returns The path to the created file
-#'
-#' @export
-tp_write_data <- function(data_list,
-                          data_file_name = "tmp_data_file",
-                          dir = tp_tempdir()) {
-  input_json <- jsonlite::toJSON(data_list, auto_unbox = TRUE)
-  path <- paste0(dir, data_file_name, ".json")
-  write(input_json, file = path)
-
-  return(path)
-}
-
-# UTILS: Data conversion
-## Sequence data
-
-# Read alignment in FASTA or NEXUS (for tree inference)
-read_aln <- function(file) {
-  # define the encoding
-  # NB: everything that is not ACTG will be replace with gap ("-") within the function
-  base_code <- c(
-    "A" = 0,
-    "C" = 1,
-    "G" = 2,
-    "T" = 3,
-    "-" = 4
+  out <- structure(
+    list(
+      model_file = tppl,
+      model_name = tools::file_path_sans_ext(basename(tppl)),
+      model_function = signature$name,
+      expect_args = signature$args$name,
+      expect_types = signature$args$type,
+      expect_class = vapply(
+        signature$args$type,
+        .tppl_type_to_r_class,
+        character(1),
+        tree_types = tree_types,
+        USE.NAMES = FALSE
+      )
+    ),
+    class = "tpEdata"
   )
 
-  # Print an error message if the input is not in fasta or nexus
-  if (!grepl("\\.(fasta|fas|nexus|nex)$", file, ignore.case = TRUE)) {
-    stop("Please, provide an input file in fasta or nexus format")
+  print(out)
+  invisible(out)
+}
+
+#' Write an R list to a TreePPL JSON input file
+#'
+#' Writes `x` with the JSON settings TreePPL needs: length-1 vectors become
+#' plain values (`"rho": 0.5`, not `"rho": [0.5]`), numbers keep their full
+#' precision, and the file is indented so it is easy to read.
+#'
+#' Each top-level element of `x` must be named exactly like an argument of
+#' the model function (see [tp_expected_input()]). A vector of length 1 that
+#' must stay an array, such as an `Int[]` with a single value, has to be
+#' wrapped in [I()].
+#'
+#' @param x A named list, one element per model argument.
+#' @param file Path of the JSON file to write.
+#'
+#' @return `file`, invisibly.
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' phy <- ape::read.tree(text = "((A:4,B:4):6,(C:7,D:7):3);")
+#' tp_write_tppl_json(
+#'   x = list(tree = tp_phylo_to_tppl(phy), rho = 0.5),
+#'   file = "testdata_crbd.json"
+#' )
+#' }
+tp_write_tppl_json <- function(x, file) {
+  if (!is.list(x) || (length(x) > 0 && is.null(names(x)))) {
+    cli::cli_abort("{.arg x} must be a named list.")
+  }
+  if (length(x) == 0) {
+    x <- stats::setNames(list(), character(0)) # written as {} instead of []
   }
 
-  # If the input is a FASTA file
-  else if (grepl("\\.(fasta|fas)$", file, ignore.case = TRUE)) {
-    raw <- readLines(file, warn = FALSE)
-    raw <- raw[nzchar(raw)] # remove empty lines, if any
-    #nm <- gsub(">", "", raw[grepl(">", raw)]) # sequence names
-    sq <- raw[!grepl(">", raw)] # sequences
-    # sequence matrix
-    sq_list <- strsplit(sq, "")
-    sq_mat <- do.call(rbind, sq_list)
-    sq_mat <- toupper(sq_mat)
-    sq_mat[] <- gsub("[^ACGT]", "-", sq_mat, ignore.case = TRUE) # replace everything that is not ACTG with "-"
-    # numerical matrix
-    num_mat <- matrix(
-      base_code[sq_mat],
-      nrow = nrow(sq_mat),
-      ncol = ncol(sq_mat)
-      #dimnames = list(nm, NULL)
+  jsonlite::write_json(
+    x,
+    path = file,
+    auto_unbox = TRUE, # length-1 vectors -> plain values
+    digits = NA, # full numeric precision
+    pretty = TRUE # indented, readable file
+  )
+  cli::cli_alert_success("Wrote {.file {file}}")
+
+  invisible(file)
+}
+
+#' Convert an `ape::phylo` tree into a TreePPL tree
+#'
+#' Builds the nested list that TreePPL reads as a binary tree:
+#'
+#' ```
+#' {"__constructor__": "Node", "__data__": {"left": .., "right": .., "age": 4}}
+#' {"__constructor__": "Leaf", "__data__": {"age": 0}}
+#' ```
+#'
+#' Ages are times before the present: tips of an ultrametric tree get age 0
+#' and the root gets the tree height. A node's `left` and `right` children are
+#' taken in the order they appear in `phy$edge`.
+#'
+#' Extra fields, such as a leaf `index` or a node `label`, are added with
+#' `leaf_extra` and `node_extra`. Each receives the ape node number (tips are
+#' `1:ape::Ntip(phy)`, the root is `ape::Ntip(phy) + 1`) and must return a
+#' named list.
+#'
+#' @param phy A rooted, binary tree of class `phylo` with branch lengths.
+#' @param leaf_ctor Constructor name used for tips, e.g. `"Leaf"` or
+#'   `"QTLeaf"`.
+#' @param node_ctor Constructor name used for internal nodes, e.g. `"Node"` or
+#'   `"QTNode"`.
+#' @param leaf_extra A function of one tip number returning a named list of
+#'   extra leaf fields.
+#' @param node_extra A function of one internal node number returning a named
+#'   list of extra node fields.
+#'
+#' @return A nested list ready for [tp_write_tppl_json()].
+#'
+#' @export
+#'
+#' @examples
+#' phy <- ape::read.tree(text = "((A:4,B:4):6,(C:7,D:7):3);")
+#'
+#' # ClockTree (diversification models)
+#' tree <- tp_phylo_to_tppl(phy)
+#'
+#' # TreeLabeled (host-repertoire models): a label on every leaf and node
+#' tree_labeled <- tp_phylo_to_tppl(
+#'   phy,
+#'   leaf_extra = function(i) list(label = i),
+#'   node_extra = function(i) list(label = i)
+#' )
+tp_phylo_to_tppl <- function(
+  phy,
+  leaf_ctor = "Leaf",
+  node_ctor = "Node",
+  leaf_extra = function(i) list(),
+  node_extra = function(i) list()
+) {
+  if (!inherits(phy, "phylo")) {
+    cli::cli_abort("{.arg phy} must be a {.cls phylo} object.")
+  }
+  if (!ape::is.rooted(phy)) {
+    cli::cli_abort("{.arg phy} must be rooted; see {.fn ape::root}.")
+  }
+  if (!ape::is.binary(phy)) {
+    cli::cli_abort("{.arg phy} must be binary; see {.fn ape::multi2di}.")
+  }
+  if (is.null(phy$edge.length)) {
+    cli::cli_abort("{.arg phy} must have branch lengths.")
+  }
+
+  # Distance from the root to every node (tips first, then internal nodes).
+  # Age = time before the present; round() removes floating-point noise.
+  depth <- ape::node.depth.edgelength(phy)
+  ages <- round(max(depth) - depth, 10)
+  n_tips <- ape::Ntip(phy)
+
+  # Build the list for one node; calls itself on the node's two children
+  # until it reaches the tips.
+  build <- function(node) {
+    if (node <= n_tips) {
+      data <- c(list(age = ages[node]), leaf_extra(node))
+      return(list("__constructor__" = leaf_ctor, "__data__" = data))
+    }
+
+    children <- phy$edge[phy$edge[, 1] == node, 2]
+    data <- c(
+      list(
+        left = build(children[1]),
+        right = build(children[2]),
+        age = ages[node]
+      ),
+      node_extra(node)
     )
-    # final list
-    res <- list(data = num_mat)
-    return(res)
+    list("__constructor__" = node_ctor, "__data__" = data)
+  }
 
-    # If the input is a NEXUS file
-  } else if (grepl("\\.(nexus|nex)$", file, ignore.case = TRUE)) {
-    # nexus matrix block
-    raw <- readLines(file, warn = FALSE)
-    raw <- raw[nzchar(raw)] # remove empty lines, if any
-    start <- grep("^[[:space:]]*matrix[[:space:]]*$", tolower(raw))
-    end <- grep(";", raw)
-    end <- end[end > start][1]
-    mat <- raw[(start + 1):(end - 1)] # extract contents
-    mat <- trimws(mat)
-    mat <- mat[nzchar(mat)] # remove empty entries
-    #nm <- sub("\\s+.*$", "", mat) # sequence names (split on the 1st white space)
-    sq <- sub("^\\S+\\s+", "", mat) # sequences
-    # sequence matrix
-    sq_list <- strsplit(sq, "")
-    sq_mat <- do.call(rbind, sq_list)
-    sq_mat <- toupper(sq_mat)
-    sq_mat[] <- gsub("[^ACGT]", "-", sq_mat, ignore.case = TRUE) # replace everything that is not ACTG with "-"
-    # numerical matrix
-    num_mat <- matrix(
-      base_code[sq_mat],
-      nrow = nrow(sq_mat),
-      ncol = ncol(sq_mat)
-      #dimnames = list(nm, NULL)
+  build(n_tips + 1) # in ape, the root is node number n_tips + 1
+}
+
+#' Convert a DNA alignment into a TreePPL integer matrix
+#'
+#' Recodes an alignment as integers, taxa in rows and sites in columns:
+#' `A = 0`, `C = 1`, `G = 2`, `T = 3`. Every other symbol (gaps `-`, `?`, `N`
+#' and IUPAC ambiguity codes) becomes `missing`. Pass the result to
+#' [tp_write_tppl_json()] after [unname()] to get an `Int[][]`.
+#'
+#' The missing-data code depends on the model: the tree-inference models use
+#' `4L` (the default) and the phenotype-molecular model (`qt.tppl`) uses
+#' `-1L`.
+#'
+#' @param aln A DNA alignment of class `DNAbin`, as returned by
+#'   [ape::read.FASTA()] or [ape::read.dna()]. All sequences must have the
+#'   same length.
+#' @param missing Integer code used for any symbol other than A, C, G or T.
+#'
+#' @return An integer matrix with taxon names as row names.
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' aln <- ape::read.FASTA("alignment.fasta")
+#' tp_dna_to_int(aln) # tree-inference models
+#' tp_dna_to_int(aln, missing = -1L) # qt model
+#' }
+tp_dna_to_int <- function(aln, missing = 4L) {
+  if (!inherits(aln, "DNAbin")) {
+    cli::cli_abort("{.arg aln} must be a {.cls DNAbin} alignment.")
+  }
+
+  # Character matrix, taxa x sites ("a", "c", "-", ...)
+  chars <- ape::as.character.DNAbin(ape::as.matrix.DNAbin(aln))
+
+  codes <- c(A = 0L, C = 1L, G = 2L, T = 3L)
+  out <- unname(codes[toupper(chars)]) # non-ACGT symbols become NA
+  out[is.na(out)] <- as.integer(missing)
+  dim(out) <- dim(chars)
+  rownames(out) <- rownames(chars)
+
+  out
+}
+
+#' Convert an R matrix into a TreePPL `Matrix[Real]`
+#'
+#' TreePPL stores a matrix as `{"m": rows, "n": columns, "arr": values}` with
+#' the values listed row by row. R stores matrices column by column, so the
+#' matrix is transposed before it is flattened.
+#'
+#' @param mat A numeric matrix.
+#'
+#' @return A list with elements `m`, `n` and `arr`, ready for
+#'   [tp_write_tppl_json()].
+#'
+#' @export
+#'
+#' @examples
+#' q <- matrix(c(-1, 1, 1, -1), nrow = 2)
+#' tp_matrix_to_tppl(mat = q)
+tp_matrix_to_tppl <- function(mat) {
+  if (!is.matrix(mat) || !is.numeric(mat)) {
+    cli::cli_abort("{.arg mat} must be a numeric matrix.")
+  }
+
+  list(m = nrow(mat), n = ncol(mat), arr = as.vector(t(mat)))
+}
+
+
+# Helper Functions ------------------------------------------------------------------
+
+#' Stop unless `tppl` is a path to an existing file
+#'
+#' `call` makes the error point at the user's call, e.g.
+#' `tp_expected_input()`, instead of at this helper.
+#' @noRd
+.check_tppl_file <- function(tppl, call = parent.frame()) {
+  if (!is.character(tppl) || length(tppl) != 1 || is.na(tppl)) {
+    cli::cli_abort("{.arg tppl} must be a single file path.", call = call)
+  }
+  if (!file.exists(tppl)) {
+    cli::cli_abort("Can't find the model file {.file {tppl}}.", call = call)
+  }
+  invisible(tppl)
+}
+
+#' Read a `.tppl` file as one string, without comments
+#'
+#' Removes `/* ... */` block comments and `// ...` line comments so that
+#' commented-out code is never parsed.
+#' @noRd
+.read_tppl_code <- function(tppl) {
+  code <- paste(readLines(tppl, warn = FALSE), collapse = "\n")
+  code <- gsub("(?s)/\\*.*?\\*/", " ", code, perl = TRUE) # (?s): span lines
+  gsub("//[^\n]*", "", code, perl = TRUE)
+}
+
+#' Parse the `model function` signature of a TreePPL model
+#'
+#' @return A list with `name` (model function name) and `args`, a data frame
+#'   with columns `name` and `type`.
+#' @noRd
+.parse_model_signature <- function(code, tppl) {
+  pattern <- "model\\s+function\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\("
+  hits <- gregexpr(pattern, code, perl = TRUE)[[1]]
+
+  if (hits[1] == -1) {
+    cli::cli_abort("No {.code model function} found in {.file {tppl}}.")
+  }
+  if (length(hits) > 1) {
+    cli::cli_warn(
+      "{.file {tppl}} has {length(hits)} model functions; using the first."
     )
-    # final list
-    res <- list(data = num_mat)
-    return(res)
-  }
-}
-
-## Phylogenetic trees
-
-#' Convert phylo obj to TreePPL tree
-#'
-#' @description
-#' `tp_phylo_to_tpjson` takes an object of class `phylo` and returns
-#' a TreePPL json str ready to print in a data file for TreePPL use.
-#'
-#' @param phylo_tree an object of class [ape::phylo].
-#' @param age a string that determines the way the age of the nodes are
-#' calculated (default "branch-length").
-#'
-#' * "branch-length" : Root's age = NA, branch-length from the parent branch
-#' * "root-to-tip" : Root's age = 0.0, cumulative branch-length from root
-#' * "tip-to-root" : Leaf's age = 0.0, cumulative branch-length from leaf
-#'
-#' @return A TreePPL json str
-#'
-#' @export
-tp_phylo_to_tpjson <- function(phylo_tree, age = "") {
-  name <- "tree"
-  root_tree <- tp_phylo_to_tppl_tree(phylo_tree)
-
-  if (age != "branch-length") {
-    tree <- tree_age_cumul(root_tree[[2]], root_tree[[1]], age)
   }
 
-  json_df <- tp_list(name = name,
-                     tree = tree,
-                     root_index = root_tree[[1]])
+  header <- regmatches(code, regexpr(pattern, code, perl = TRUE))
+  name <- sub(pattern, "\\1", header, perl = TRUE)
 
-  tp_treeppl_json(json_df)
+  # Text between the opening "(" and its matching ")"
+  open_at <- hits[1] + attr(hits, "match.length")[1] - 1
+  inside <- .extract_balanced(code, open_at)
+
+  pieces <- .split_top_level(inside, sep = ",")
+  pieces <- pieces[pieces != ""]
+
+  arg_pattern <- "^([A-Za-z_][A-Za-z0-9_]*)\\s*:\\s*(.+)$"
+  bad <- !grepl(arg_pattern, pieces, perl = TRUE)
+  if (any(bad)) {
+    cli::cli_abort(c(
+      "Can't read the arguments of {.fn {name}} in {.file {tppl}}.",
+      "x" = "Unexpected argument{?s}: {.code {pieces[bad]}}"
+    ))
+  }
+
+  args <- data.frame(
+    name = sub(arg_pattern, "\\1", pieces, perl = TRUE),
+    type = gsub("\\s+", "", sub(arg_pattern, "\\2", pieces, perl = TRUE)),
+    stringsAsFactors = FALSE
+  )
+
+  list(name = name, args = args)
 }
 
-#' Convert phylo to a tppl_tree
-#'
-#' @description
-#' `tp_phylo_to_tppl_tree` takes an object of class `phylo` and returns
-#' a tppl_tree.
-#'
-#' @param phylo_tree an object of class [ape::phylo].
-#'
-#' @return A pair (root index, tppl_tree)
-tp_phylo_to_tppl_tree <- function(phylo_tree) {
-  name <- deparse(substitute(phylo_tree))
+#' Return the text between a bracket at position `open_at` and its partner
+#' @noRd
+.extract_balanced <- function(code, open_at) {
+  chars <- strsplit(substring(code, open_at), "")[[1]]
+  depth <- 0
 
-  df_ <- tidytree::as_tibble(phylo_tree)
-
-  tree <- data.frame(matrix(
-    c(NA, NA, 0.0, NA, NA),
-    ncol = 5,
-    nrow = nrow(df_),
-    byrow = TRUE
-  ))
-  colnames(tree) <- c("Type", "Label", "Age", "Left", "Right")
-
-  num_leaf <- nrow(df_) - phylo_tree$Nnode
-
-  for (i in seq_len(nrow(df_))) {
-    row <- df_[i, ]
-    tree[row$node, "Label"] <- row$node
-    tree[row$node, "Age"] <- row$branch.length
-
-    if (row$parent == row$node) {
-      tree[row$node, "Type"] <- "Node"
-      root_index <- row$node
-    } else {
-      if (i <= num_leaf) {
-        tree[row$node, "Type"] <- "Leaf"
-      } else {
-        tree[row$node, "Type"] <- "Node"
+  for (i in seq_along(chars)) {
+    if (chars[i] == "(") depth <- depth + 1
+    if (chars[i] == ")") depth <- depth - 1
+    if (depth == 0) {
+      if (i <= 2) {
+        return("") # "()" -> a model without arguments
       }
-      if (is.na(tree[row$parent, "Left"])) {
-        tree[row$parent, "Left"] <- row$node
-      } else {
-        tree[row$parent, "Right"] <- row$node
+      return(paste(chars[2:(i - 1)], collapse = ""))
+    }
+  }
+
+  cli::cli_abort("The model signature has no closing {.code )}.")
+}
+
+#' Split a string at `sep`, ignoring separators inside (), [] or {}
+#' @noRd
+.split_top_level <- function(text, sep = ",") {
+  chars <- strsplit(text, "")[[1]]
+  depth <- 0
+  pieces <- character(0)
+  current <- ""
+
+  for (ch in chars) {
+    if (ch %in% c("(", "[", "{")) depth <- depth + 1
+    if (ch %in% c(")", "]", "}")) depth <- depth - 1
+
+    if (ch == sep && depth == 0) {
+      pieces <- c(pieces, current)
+      current <- ""
+    } else {
+      current <- paste0(current, ch)
+    }
+  }
+
+  trimws(c(pieces, current))
+}
+
+#' Find the names of all tree types visible to a model file
+#'
+#' Looks in the model file and, recursively, in every file it imports with a
+#' relative path (`import "lib/types.tppl"`). Standard-library imports
+#' (`stdlib::...`) and `.mc` files are skipped. `ClockTree`, TreePPL's
+#' built-in tree, is always included.
+#' @noRd
+.find_tree_types <- function(tppl) {
+  files <- .collect_tppl_files(tppl)
+  code <- vapply(files, .read_tppl_code, character(1))
+  code <- paste(code, collapse = "\n")
+
+  tree_types <- "ClockTree"
+
+  # Recursive types: a field of type X inside the definition of X
+  type_pattern <- "\\btype\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*="
+  hits <- gregexpr(type_pattern, code, perl = TRUE)
+  starts <- hits[[1]]
+  if (starts[1] != -1) {
+    type_names <- sub(
+      type_pattern, "\\1", regmatches(code, hits)[[1]],
+      perl = TRUE
+    )
+    ends <- c(starts[-1] - 1, nchar(code)) # each body runs to the next `type`
+    for (i in seq_along(starts)) {
+      body <- substr(code, starts[i], ends[i])
+      self_ref <- paste0(":\\s*", type_names[i], "\\b")
+      if (grepl(self_ref, body, perl = TRUE)) {
+        tree_types <- c(tree_types, type_names[i])
       }
     }
   }
-  list(root_index, tree)
-}
 
-#' Calculate age in a tppl_tree
-#'
-#' @description
-#' `tree_age_cumul` takes an tppl_tree and returns a json with
-#' branch length accumulation as node's age.
-#'
-#' @param tree an tppl_tree create with [treepplr::tp_phylo_to_tppl_tree].
-#' @param root_index the index of the root in the tppl_tree.
-#' @param age a string that determine the way the age of the node are
-#' calculated (default "branch-length").
-#'
-#' * "root-to-tip" : Root's age = 0.0, cumulative branch-length from root
-#' * "tip-to-root" : Leaf's age = 0.0, cumulative branch-length from leaf
-#'
-#' @return A tppl_tree
-
-tree_age_cumul <- function(tree, root_index, age = "branch-length") {
-  age_cumul <- rep(length(tree$Type), 0.0)
-  down <- TRUE
-  going_left <- c(TRUE, NA)
-  i <- root_index
-  if (age == "root-to-tip") {
-    tree[i, "Age"] <- 0.0
-    age_cumul[i] <- 0.0
-  }
-  parent <- c()
-  while (down || !is.na(going_left[1]) || (i != root_index)) {
-    if (down) {
-      if (tree[i, "Type"] == "Node") {
-        parent <- c(i, parent)
-        if (going_left[1]) {
-          i <- tree[i, "Left"]
-        } else {
-          i <- tree[i, "Right"]
-        }
-        going_left <- c(TRUE, going_left)
-        if (age == "root-to-tip") {
-          age_cumul[i] <- age_cumul[parent[1]] + tree[i, "Age"]
-        }
-      } else {
-        down <- FALSE
-        going_left <- going_left[-1]
-        if (age == "tip-to-root") {
-          age_cumul[i] <- 0.0
-        }
-      }
-    } else {
-      i <- parent[1]
-      parent <- parent[-1]
-      if (going_left[1]) {
-        down <- TRUE
-        going_left[1] <- FALSE
-        if (age == "tip-to-root") {
-          age_cumul[i] <- age_cumul[tree[i, "Left"]] + tree[tree[i, "Left"], "Age"]
-        }
-      } else {
-        down <- FALSE
-        going_left <- going_left[-1]
-      }
+  # Aliases of tree types, e.g. `type alias Tree = ClockTree`
+  alias_pattern <- paste0(
+    "\\btype\\s+alias\\s+([A-Za-z_][A-Za-z0-9_]*)",
+    "\\s*=\\s*([A-Za-z_][A-Za-z0-9_]*)"
+  )
+  aliases <- regmatches(code, gregexpr(alias_pattern, code, perl = TRUE))[[1]]
+  for (alias in aliases) {
+    from <- sub(alias_pattern, "\\1", alias, perl = TRUE)
+    to <- sub(alias_pattern, "\\2", alias, perl = TRUE)
+    if (to %in% tree_types) {
+      tree_types <- c(tree_types, from)
     }
   }
-  tree$Age <- age_cumul
-  tree
+
+  unique(tree_types)
 }
 
-#' Convert a tppl_tree to TreePPL json str
+#' List a `.tppl` file and every `.tppl` file it imports (relative paths)
+#' @noRd
+.collect_tppl_files <- function(tppl, seen = character(0)) {
+  tppl <- normalizePath(tppl, mustWork = FALSE)
+  if (tppl %in% seen || !file.exists(tppl)) {
+    return(seen)
+  }
+  seen <- c(seen, tppl)
+
+  code <- .read_tppl_code(tppl)
+  imports <- regmatches(
+    code,
+    gregexpr('import\\s+"([^"]+)"', code, perl = TRUE)
+  )[[1]]
+  imports <- sub('import\\s+"([^"]+)"', "\\1", imports, perl = TRUE)
+  imports <- imports[!grepl("::", imports) & grepl("\\.tppl$", imports)]
+
+  for (path in file.path(dirname(tppl), imports)) {
+    seen <- .collect_tppl_files(path, seen)
+  }
+
+  seen
+}
+
+#' Translate a TreePPL type into the R object a user should supply
+#' @noRd
+.tppl_type_to_r_class <- function(type, tree_types) {
+  # Count trailing "[]" pairs: Real[][] -> base "Real", 2 dimensions
+  n_dims <- 0
+  base <- type
+  while (grepl("\\[\\]$", base)) {
+    base <- sub("\\[\\]$", "", base)
+    n_dims <- n_dims + 1
+  }
+
+  atomic <- c(
+    Real = "numeric",
+    Int = "integer",
+    Bool = "logical",
+    String = "character"
+  )
+
+  if (base %in% names(atomic)) {
+    r_base <- atomic[[base]]
+    return(switch(as.character(min(n_dims, 2)),
+      "0" = r_base,
+      "1" = paste(r_base, "vector"),
+      "2" = paste(r_base, "matrix")
+    ))
+  }
+
+  if (grepl("^Matrix\\[", base)) {
+    return(if (n_dims == 0) "matrix" else "list of matrices")
+  }
+
+  if (base %in% tree_types) {
+    return(if (n_dims == 0) "phylo" else "multiPhylo")
+  }
+
+  # Records and other user-defined types: show the TreePPL type itself
+  if (n_dims == 0) base else paste("list of", base)
+}
+
+
+# Printing Methods ------------------------------------------------------------------
+
+#' Print the expected input of a TreePPL model
 #'
-#' @description
-#' `tp_treeppl_json` takes an tppl_tree create with [treepplr::tp_phylo_to_tppl_tree]
-#'  and returns a list ready to be exported with JSON
+#' Console method for objects returned by [tp_expected_input()]. It shows the
+#' model file, the model name and one line per argument, in green, with the R
+#' object to supply in brackets.
 #'
-#' @param tree an object of class json.
+#' @param x An object of class `tpEdata`.
+#' @param ... Not used; present for compatibility with [print()].
 #'
-#' @return A TreePPL json str
+#' @return `x`, invisibly.
+#'
 #' @export
-#'
-tp_treeppl_json <- function(tree) {
-  pjs_list <- list(rec_tree_list(tree$tree, tree$root_index))
-  names(pjs_list) <- tree$name
+print.tpEdata <- function(x, ...) {
+  cli::cli_h2("Expected Input")
+  cli::cli_text("Model file: {.val {x$model_file}}")
+  cli::cli_text("Model name: {x$model_name}")
 
-  pjs_list
-}
-
-rec_tree_list <- function(tree, row_index) {
-  row <- tree[row_index, ]
-
-  sub_pjs_list <- list("label" = row$Label, "age" = row$Age)
-  if (row$Type != "Leaf") {
-    sub_pjs_list <- c(sub_pjs_list,
-                      list(
-                        "left" = rec_tree_list(tree, row$Left),
-                        "right" = rec_tree_list(tree, row$Right)
-                      ))
+  if (length(x$expect_args) == 0) {
+    cli::cli_text(
+      "Expected arguments: none (write an empty JSON object, {.code {{}}})"
+    )
+    return(invisible(x))
   }
 
-  pjs_list <- list("__constructor__" = row$Type, "__data__" = sub_pjs_list)
-
-  pjs_list
-}
-
-#' Convert TreePPL multi-line JSON to R phylo/multiPhylo object with associated
-#' weights
-#'
-#' @description
-#' `tp_json_to_phylo` takes the path to a TreePPL json output and returns an
-#' object of class `phylo`.
-#'
-#' @param json_out One of two options:
-#'   * A list of TreePPL output in parsed JSON format (output from
-#'   [treepplr::tp_run()]), OR
-#'   * The full path of the json file containing the TreePPL output.
-#'
-#' @return A list with two elements:
-#'         $trees: A 'phylo' object (if one tree) or 'multiPhylo' object (if multiple).
-#'         $weights: A numeric vector of sample weights.
-#' @export
-tp_json_to_phylo <- function(json_out) {
-  res <- try(file.exists(json_out), silent = TRUE)
-  # If path exists, import output from file
-  if (!is(res, "try-error") && res) {
-    ## Read lines and parse each line as a separate JSON object
-    raw_lines <- readLines(json_out, warn = FALSE)
-
-    # Filter out empty lines just in case
-    raw_lines <- raw_lines[raw_lines != ""]
-
-    json_list <- lapply(raw_lines, function(x) {
-      jsonlite::fromJSON(x, simplifyVector = FALSE)
-    })
-
-    # If path doesn't exist, then it should be a list
-  } else if (is.list(json_out)) {
-    json_list <- json_out
-  } else {
-    stop("Incorrect input format")
+  cli::cli_text("Expected arguments:")
+  lines <- cli::col_green(paste0(x$expect_args, " (", x$expect_class, ")"))
+  cli::cli_ul()
+  for (line in lines) {
+    cli::cli_li("{line}")
   }
+  cli::cli_end()
 
-  ## Process each tree in the list
-  newick_strings <- sapply(json_list, function(sweep) {
-    # loop over all particles within the sweep
-    samples <- sweep$samples
-
-    sweep_string <- sapply(samples, function(particle) {
-      # Extract the root age
-      root_data <- particle[[1]]$`__data__`
-      root_age  <- root_data$age
-
-      # Start recursion from the children of the root.
-      # The root itself does not have a branch length in standard Newick,
-      # but it provides the 'parent_age' for its immediate children.
-
-      left_str  <- build_newick_node(root_data$left, root_age)
-      right_str <- build_newick_node(root_data$right, root_age)
-
-      # Construct final Newick string: (ChildL, ChildR);
-      paste0("(", left_str, ",", right_str, ");")
-    })
-
-  })
-
-  # 4. Convert to phylo
-  trees <- ape::read.tree(text = newick_strings)
-
-  # 5. Get weight for each tree
-  nweight_matrix <- sapply(json_list, function(sweep) {
-    nconst <- sweep$normConst
-    logweights <- unlist(sweep$weights)
-    log_nw <- nconst + logweights
-
-  })
-
-  nweights <- as.vector(nweight_matrix)
-  norm_weights <- exp(nweights - max(nweights))
-
-  return(list(trees = trees, weights = norm_weights))
-}
-
-# 2. Recursive function to build Newick string
-# 'parent_age' is passed down from the caller
-build_newick_node <- function(node, parent_age) {
-  type <- node[["__constructor__"]]
-  data <- node[["__data__"]]
-
-  # Ensure ages are numeric
-  parent_age <- as.numeric(parent_age)
-
-  if (type == "Leaf") {
-    # Rule: Leaf branch length is the age of its parent node
-    len <- parent_age
-
-    if (is.null(data$label)) {
-      label <- data$index
-    } else {
-      label <- data$label
-    }
-
-    # Return "Label:Length"
-    return(paste0(label, ":", len))
-
-  } else if (type == "Node") {
-    # Rule: Internal node branch length = Parent Age - Own Age
-    current_age <- as.numeric(data$age)
-    len <- parent_age - current_age
-
-    # Recursively process children, passing CURRENT age as their 'parent_age'
-    left_str <- build_newick_node(data$left, current_age)
-    right_str <- build_newick_node(data$right, current_age)
-
-    # Return "(Left,Right):Length"
-    return(paste0("(", left_str, ",", right_str, "):", len))
-  }
-}
-
-# Function to ladderize tree and correct tip label sequence
-ladderize_tree <- function(tree,
-                           temp_file = "temp",
-                           orientation = "left") {
-  if (file.exists(paste0("./", temp_file))) {
-    stop("The chosen temporary file exists! Please choose an other temp_file name")
-  }
-  if (orientation == "left") {
-    right <- FALSE
-  } else{
-    right <- TRUE
-  }
-  tree_temp <- ape::ladderize(tree, right = right)
-  ape::write.tree(tree_temp, file = paste0("./", temp_file, ".tre"))
-  tree_lad <- ape::read.tree(paste0("./", temp_file, ".tre"))
-  file.remove(paste0("./", temp_file, ".tre"))
-  return(tree_lad)
+  invisible(x)
 }

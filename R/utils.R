@@ -208,24 +208,39 @@ tp_list <- function(...) {
   invisible(destfile)
 }
 
-#' Find model or data files in the TreePPL model library
+#' Find model, data or auto-import files in the TreePPL library
 #'
 #' @description
-#' `.find()` locates `.tppl` model files or `.json` data files in the TreePPL
-#' model library. The library is taken from the `MCORE_LIBS` environment
-#' variable if set, otherwise from the self-contained TreePPL installation.
+#' `.find()` locates `.tppl` model files, `.json` data files, or the `.tppl`
+#' files TreePPL auto-imports into every model. The library is taken from the
+#' `MCORE_LIBS` environment variable if set, otherwise from the self-contained
+#' TreePPL installation.
 #'
-#' @param type Either `"model"` (`.tppl` files) or `"data"` (`.json` files).
-#' @param model_name Name of the model, without extension (treated as a regular
-#'   expression). If `NULL`, all files of the given `type` are returned.
+#' @details
+#' TreePPL lays the library out as `models/` and `auto-import/` side by side,
+#' so `type` selects both the subdirectory to search and the extension to look
+#' for. `type = "auto-import"` is normally called without a `model_name`: the
+#' auto-imports are the handful of files that define `ClockTree`, `Matrix` and
+#' the delayed-sampling distributions, which models use without importing them
+#' and which [.model_spec()] therefore has to read alongside the model itself.
 #'
-#' @return A character vector of file paths.
+#' @param type One of `"model"` (`.tppl` files under `models/`), `"data"`
+#'   (`.json` files under `models/`), or `"auto-import"` (`.tppl` files under
+#'   `auto-import/`).
+#' @param model_name Name of the model, or names of several, without the
+#'   extension. Matched exactly against the file name, not as a pattern, so a
+#'   name that is a suffix of another file's name cannot pick up that file
+#'   and a name holding regular expression metacharacters cannot match
+#'   anything it does not spell. For `type = "data"` the model's own name
+#'   also matches its `testdata_<model>.json` file. If `NULL`, all files of
+#'   the given `type` are returned.
+#'
+#' @return A character vector of file paths, empty when nothing matches.
 #' @noRd
-.find <- function(type = c("model", "data"), model_name = NULL) {
+.find <- function(type = c("model", "data", "auto-import"), model_name = NULL) {
   type <- match.arg(type)
-  ext <- if (type == "model") "tppl" else "json"
-  name <- if (is.null(model_name)) ".*" else model_name
-  pattern <- paste0(name, "\\.", ext, "$")
+  ext <- if (type == "data") "json" else "tppl"
+  subdir <- if (type == "auto-import") "auto-import" else "models"
 
   # if MCORE_LIBS is set in ~/.Renviron
   mcore_libs <- Sys.getenv("MCORE_LIBS")
@@ -235,17 +250,27 @@ tp_list <- function(...) {
     # root of the unpacked installation
     root <- dirname(tp_installing_treeppl())
     root <- list.files(root, pattern = "treeppl", full.names = TRUE)
-    root <- paste0(root, "/lib/mcore/treeppl/models")
+    root <- paste0(root, "/lib/mcore/treeppl")
   }
 
-  # search the whole root and keep files located inside a "models" directory
   paths <- list.files(
-    path = root,
-    pattern = pattern,
+    path = file.path(root, subdir),
+    pattern = paste0("\\.", ext, "$"),
     recursive = TRUE,
     full.names = TRUE
   )
-  paths[grepl("/models/", paths, fixed = TRUE)]
+
+  if (is.null(model_name)) {
+    return(paths)
+  }
+
+  # The library names a model's test data `testdata_<model>.json`, so a data
+  # file is looked up under the model's own name as well as its file name.
+  wanted <- paste0(model_name, ".", ext)
+  if (type == "data") {
+    wanted <- c(wanted, paste0("testdata_", model_name, ".", ext))
+  }
+  paths[basename(paths) %in% wanted]
 }
 
 #' Print the model library in the console

@@ -518,9 +518,13 @@ tp_matrix_to_tppl <- function(mat) {
     return(if (n_dims == 0) "matrix" else "list of matrices")
   }
 
-  if (base %in% tree_types) {
-    return(if (n_dims == 0) "phylo" else "multiPhylo")
-  }
+  # QTTreees are very specific tree types that cannot be produced directly by tp_data().
+  # Building one from a ape::phylo object is possible via tp_phylo_to_tppl(), but that
+  # requires additional arguments (objects) that are not listed in tp_expected_input("qt").
+  # I will write a short vignette on how to build QTTrees.
+  if (base == "QTTree") "QTTree"
+
+  if (base != "QTTree" && base %in% tree_types) "phylo"
 
   # Records and other user-defined types: show the TreePPL type itself
   if (n_dims == 0) base else paste("list of", base)

@@ -1,5 +1,131 @@
 # Exported Functions -----------------------------------------------------------
 
+
+# Experimental tp_data()
+# Things to add: class list <tpData> with print method, must have field data_path
+tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
+  # Expected arguments (the order doesn't matter)
+  suppressMessages(
+    model_specs <- tp_expected_input(model)
+  )
+
+  ## TREES ----
+  # Convert object of class phylo to TreePPL tree types. NB: This won't work if a model
+  # takes more than one tree as input.
+  tree_type <- model_specs$expect_types
+  tree_type <- tree_type[grepl("Tree", tree_type, ignore.case = TRUE)]
+  tree_user <- dataList[["tree"]]
+
+  # If the model requires a tree but the user do not provide one
+  if (length(tree_type) > 0 && is.null(tree_user)) {
+    cli::cli_abort(c(
+      "x" = "Tree not found.",
+      "i" = "Argument {.arg dataList} must contain a phylogenetic tree."
+    ))
+  }
+
+  # Every tree that is not a QTTree must be of class phylo
+  if (tree_type != "QTTree" && !inherits(dataList[["tree"]], "phylo")) {
+    cli::cli_abort(c(
+      "x" = "Model {.val {model}} requires a tree of class {.cls phylo}"
+    ))
+  }
+
+  # A QTTree cannot be converted directly here, it must be created externally
+  if (tree_type == "QTTree" && inherits(dataList[["tree"]], "phylo")) {
+    cli::cli_abort(c(
+      "x" = "Argument {.arg tree} of model {.val {model}} must be a {.cls QTTree}.",
+      "i" = "See the examples in {.run ?tp_phylo_to_tppl()} for how to build one."
+    ))
+  }
+
+  ## CONVERTING R TREES TO TPPL TREES ##
+
+  # If the TPPL expects a type:
+
+  # <Tree> or <ClockTree>
+  if (tree_type == "Tree" || tree_type == "ClockTree") {
+    tree_user <- tp_phylo_to_tppl(phy = tree_user)
+
+    # <TreeLabeled>
+  } else if (tree_type == "TreeLabeled") {
+    tree_user <- tp_phylo_to_tppl(
+      phy = tree_user,
+      leaf_extra = function(i) list(label = i),
+      node_extra = function(i) list(label = i)
+    )
+
+    # <GTR_Tree>
+  } else if (tree_type == "GTR_Tree") {
+    tip_labels <- tree_user$tip.label
+    dna_int <- dataList[["data"]]
+    tip_row <- match(tip_labels, rownames(dna_int))
+
+    if (all(is.na(tip_row))) {
+      cli::cli_abort(c(
+        "No tip label of {.arg tree} matches a row name of {.arg data}.",
+        "i" = paste(
+          "Tips: {.val {utils::head(tip_labels, 3)}};",
+          "rows: {.val {utils::head(rownames(dna_int), 3)}}."
+        )
+      ))
+    }
+
+    if (anyNA(tip_row)) {
+      missing_tips <- tip_labels[is.na(tip_row)]
+      cli::cli_abort(c(
+        "Every tip of {.arg tree} must have a sequence in {.arg data}.",
+        "x" = "{cli::qty(missing_tips)}Tip{?s} not found: {.val {missing_tips}}."
+      ))
+    }
+
+    # GTR_Tree
+    tree_user <- tp_phylo_to_tppl(
+      phy = tree_user,
+      leaf_extra = function(i) list(index = tip_row[i])
+    )
+
+    # Unnamed matrix
+    storage.mode(dna_int) <- "integer" # JSON gets 0, not 0.0
+    dataList[["data"]] <- unname(dna_int)
+  }
+
+  # Replace the <phylo> tree with the correct TPPL tree
+  dataList[["tree"]] <- tree_user
+
+  ## WRITE THE JSON ----
+
+  # File name: same data gets same name, different data gets different name
+  if (is.null(filename)) {
+    hash <- digest::digest(dataList, algo = "sha256")
+    filename <- file.path(
+      tp_tempdir(),
+      paste0("input-", model, "-", substr(hash, 1, 7), ".json")
+    )
+  }
+
+  # Write JSON file
+  tp_write_tppl_json(x = dataList, file = filename)
+
+  # Check
+  if (check) {
+    tp_input_check(json = filename, tppl = model_specs$model_file)
+  }
+
+  filename
+}
+
+
+
+
+
+
+
+
+
+
+
+
 #' List the input arguments a TreePPL model expects
 #'
 #' Scans a `.tppl` file, finds its `model function` signature and reports the
@@ -295,6 +421,75 @@ tp_matrix_to_tppl <- function(mat) {
   list(m = nrow(mat), n = ncol(mat), arr = as.vector(t(mat)))
 }
 
+#' Check a JSON input file against a TreePPL model
+#'
+#' Compares the top-level fields of a JSON input file with the arguments of
+#' the `model function` in a `.tppl` file, and reports the result in the
+#' console. Use it before running a model to catch misspelled, missing or
+#' extra inputs.
+#'
+#' The check covers names only: it does not test whether each value has the
+#' right type. See [tp_expected_input()] for the R object each argument
+#' expects.
+#'
+#' @param json Path to a JSON input file, e.g. one written by
+#'   [tp_write_tppl_json()].
+#' @param tppl Path to the `.tppl` model file.
+#'
+#' @return Invisibly, a list of class `tpIcheck` with elements:
+#'   * `json_file`, `model_file`: the paths given in `json` and `tppl`.
+#'   * `model_name`: the file name of `tppl` without `.tppl`.
+#'   * `valid`: `TRUE` if the JSON fields and the model arguments match
+#'     exactly, `FALSE` otherwise.
+#'   * `missing`: model arguments that are not in the JSON file.
+#'   * `extra`: JSON fields that the model does not take.
+#'   * `expect_args`: all model arguments, in signature order.
+#'   * `fields`: all top-level JSON fields.
+#'
+#' @seealso [print.tpIcheck()] for the console output, [tp_expected_input()],
+#'   [tp_write_tppl_json()].
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' tp_input_check(
+#'   json = "json/testdata_qt.json",
+#'   tppl = "models/pheno-mol/qt.tppl"
+#' )
+#'
+#' # Stop a script if the input does not match the model
+#' if (!tp_input_check("input.json", "qt.tppl")$valid) {
+#'   stop("Fix the input file first.")
+#' }
+#' }
+tp_input_check <- function(json, tppl) {
+  .check_tppl_file(tppl)
+  fields <- .read_json_fields(json)
+
+  signature <- .parse_model_signature(.read_tppl_code(tppl), tppl)
+  expect_args <- signature$args$name
+  missing <- setdiff(expect_args, fields)
+  extra <- setdiff(fields, expect_args)
+
+  out <- structure(
+    list(
+      json_file = json,
+      model_file = tppl,
+      model_name = tools::file_path_sans_ext(basename(tppl)),
+      valid = length(missing) == 0 && length(extra) == 0,
+      missing = missing,
+      extra = extra,
+      expect_args = expect_args,
+      fields = fields
+    ),
+    class = "tpIcheck"
+  )
+
+  print(out)
+  invisible(out)
+}
+
 
 # Helper Functions ------------------------------------------------------------------
 
@@ -522,14 +717,53 @@ tp_matrix_to_tppl <- function(mat) {
   # Building one from a ape::phylo object is possible via tp_phylo_to_tppl(), but that
   # requires additional arguments (objects) that are not listed in tp_expected_input("qt").
   # I will write a short vignette on how to build QTTrees.
-  if (base == "QTTree") "QTTree"
-
-  if (base != "QTTree" && base %in% tree_types) "phylo"
+  if (base == "QTTree") {
+    return("QTTree")
+  }
+  if (base != "QTTree" && base %in% tree_types) {
+    return("phylo")
+  }
 
   # Records and other user-defined types: show the TreePPL type itself
   if (n_dims == 0) base else paste("list of", base)
 }
 
+#' Read the top-level field names of a JSON input file
+#'
+#' Stops with a clear message if the file is missing, is not valid JSON, or
+#' holds an array instead of an object. `{}` and `[]` give zero fields.
+#' @noRd
+.read_json_fields <- function(json, call = parent.frame()) {
+  if (!is.character(json) || length(json) != 1 || is.na(json)) {
+    cli::cli_abort("{.arg json} must be a single file path.", call = call)
+  }
+  if (!file.exists(json)) {
+    cli::cli_abort("Can't find the JSON file {.file {json}}.", call = call)
+  }
+
+  input <- tryCatch(
+    jsonlite::read_json(json, simplifyVector = FALSE),
+    error = function(e) {
+      reason <- conditionMessage(e)
+      cli::cli_abort(
+        c("Can't read {.file {json}} as JSON.", "x" = "{reason}"),
+        call = call
+      )
+    }
+  )
+
+  if (length(input) > 0 && is.null(names(input))) {
+    cli::cli_abort(
+      c(
+        "{.file {json}} must contain a JSON object, {.code {{...}}}.",
+        "x" = "It contains an array, {.code [...]}, instead."
+      ),
+      call = call
+    )
+  }
+
+  if (is.null(names(input))) character(0) else names(input)
+}
 
 # Printing Methods ------------------------------------------------------------------
 
@@ -564,6 +798,46 @@ print.tpEdata <- function(x, ...) {
     cli::cli_li("{line}")
   }
   cli::cli_end()
+
+  invisible(x)
+}
+
+#' Print the result of a TreePPL input check
+#'
+#' Console method for objects returned by [tp_input_check()]. A match is
+#' shown with a green tick; otherwise missing arguments are shown in red,
+#' extra fields in yellow, and a pointer to [tp_expected_input()].
+#'
+#' @param x An object of class `tpIcheck`.
+#' @param ... Not used; present for compatibility with [print()].
+#'
+#' @return `x`, invisibly.
+#'
+#' @export
+print.tpIcheck <- function(x, ...) {
+  cli::cli_h2("Input Check")
+  cli::cli_text("JSON file: {.val {x$json_file}}")
+  cli::cli_text("Model name: {x$model_name}")
+
+  n_args <- length(x$expect_args)
+
+  if (x$valid && n_args == 0) {
+    cli::cli_alert_success("Model {.val {x$model_name}} takes no arguments.")
+  } else if (x$valid) {
+    cli::cli_alert_success(
+      "All {n_args} argument{?s} found: {.arg {x$expect_args}}."
+    )
+  } else {
+    if (length(x$missing) > 0) {
+      cli::cli_alert_danger(
+        "{cli::qty(x$missing)}Missing argument{?s}: {.arg {x$missing}}."
+      )
+    }
+    if (length(x$extra) > 0) {
+      cli::cli_alert_warning("Not used by the model: {.arg {x$extra}}.")
+    }
+    cli::cli_alert_info("See {.run tp_expected_input(\"{x$model_file}\")}.")
+  }
 
   invisible(x)
 }

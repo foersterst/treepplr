@@ -16,3 +16,12 @@ TPPLC_VERSION <- "0.4"
 .onLoad <- function(libname, pkgname){
   tp_installing_treeppl(download =  FALSE)
 }
+
+# Cool loading message: works with both load_all() and library()
+.onAttach <- function(libname, pkgname) {
+  packageStartupMessage(
+    cli::format_inline(
+      "\U0001F333 {.pkg treepplr} {utils::packageVersion(pkgname)} \U0001F333"
+    )
+  )
+}

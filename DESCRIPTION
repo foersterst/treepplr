@@ -55,4 +55,4 @@ Remotes:
     github::maribraga/evolnets,
     bioc::ggtree,
     bioc::treeio
-Config/roxygen2/version: 8.1.0
+Config/roxygen2/version: 8.1.1

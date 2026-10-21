@@ -1,9 +1,76 @@
 # Exported Functions -----------------------------------------------------------
 
-
-# Experimental tp_data()
-# Things to add: class list <tpData> with print method, must have field data_path
+#' Write the JSON input file for a TreePPL model
+#'
+#' @description
+#' `tp_data()` converts the R objects in `dataList` to the types a TreePPL
+#' model expects and writes them to a JSON file that can be passed to
+#' [tp_run()]. The written file is checked against the model with
+#' [tp_input_check()] unless `check = FALSE`.
+#'
+#' @details
+#' Each element of `dataList` must be named exactly like an argument of the
+#' model (see [tp_expected_input()]); the order does not matter.
+#'
+#' A tree must be given as `dataList$tree`, of class `phylo` (see
+#' [ape::read.tree()]). It is converted to the tree type the model expects:
+#'
+#' | TreePPL tree type      | Extra fields added to the tree              |
+#' |------------------------|---------------------------------------------|
+#' | `Tree`, `ClockTree`    | none                                        |
+#' | `TreeLabeled`          | a `label` on every leaf and node            |
+#' | `GTR_Tree`             | an `index` on every leaf (its row in `data`) |
+#' | `QTTree`               | not converted: build it with [tp_phylo_to_tppl()] |
+#'
+#' For a `GTR_Tree`, `dataList$data` must be an integer matrix with taxa in
+#' rows, sites in columns and taxon names as row names (see
+#' [tp_dna_to_int()]). Every tip label of the tree must match a row name.
+#'
+#' @param model Path to the `.tppl` model file.
+#' @param dataList A named list with one element per model argument.
+#' @param filename Path of the JSON file to write. If `NULL` (default), the
+#'   file is written to [tp_tempdir()] and named after the model and a hash of
+#'   the data, so the same data always gets the same file name and different
+#'   data a different one.
+#' @param check Logical. If `TRUE` (default), check the written file against
+#'   the model with [tp_input_check()] and print the result.
+#'
+#' @return Invisibly, a list of class `tpData` with elements:
+#'   * `data_path`: path to the JSON file.
+#'   * `model_name`: the model's name (file name without `.tppl`).
+#'   * `expect_args`: the model's argument names, in signature order.
+#'   * `expect_types`: the TreePPL type of each argument.
+#'   * `expect_class`: the R object expected for each argument.
+#'
+#' @seealso [tp_expected_input()] for the arguments a model expects,
+#'   [tp_input_check()], [tp_run()].
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' phy <- ape::read.tree(text = "((A:4,B:4):6,(C:7,D:7):3);")
+#'
+#' # Diversification model: tree (phylo) and sampling fraction
+#' k <- tp_data(
+#'   model = "models/diversification/crbd.tppl",
+#'   dataList = list(tree = phy, rho = 0.5)
+#' )
+#' k            # prints the summary again
+#' k$data_path  # path to the JSON file
+#'
+#' # Fixed-tree GTR model: integer alignment with taxon names as row names
+#' aln <- ape::read.FASTA("alignment.fasta")
+#' k <- tp_data(
+#'   model = "models/tree-inference/substmodel_belief_propagation.tppl",
+#'   dataList = list(data = tp_dna_to_int(aln), tree = phy)
+#' )
+#' }
 tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
+  if (!is.list(dataList) || (length(dataList) > 0 && is.null(names(dataList)))) {
+    cli::cli_abort("{.arg dataList} must be a named list.")
+  }
+
   # Expected arguments (the order doesn't matter)
   suppressMessages(
     model_specs <- tp_expected_input(model)
@@ -103,6 +170,9 @@ tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
     )
   }
 
+  # Write JSON file
+  suppressMessages(tp_write_tppl_json(x = dataList, file = filename))
+
   # Output List
   out <- structure(
     list(
@@ -121,20 +191,28 @@ tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
     class = "tpData"
   )
 
-  # Write JSON file
-  suppressMessages(tp_write_tppl_json(x = dataList, file = filename))
+  print(out)
 
   # Check
   if (check) {
     tp_input_check(json = filename, tppl = model_specs$model_file)
-    return(invisible(out))
   }
 
-  print(out)
   invisible(out)
 }
 
-# Print method
+#' Print the JSON input of a TreePPL model
+#'
+#' Console method for objects returned by [tp_data()]. It shows the path to
+#' the JSON file, the model name and the arguments written to the file, with
+#' the R object each one was built from.
+#'
+#' @param x An object of class `tpData`.
+#' @param ... Not used; present for compatibility with [print()].
+#'
+#' @return `x`, invisibly.
+#'
+#' @export
 print.tpData <- function(x, ...) {
   cli::cli_h2("Data Input")
   cli::cli_text("Data file: {.val {x$data_path}}")

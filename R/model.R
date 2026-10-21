@@ -82,44 +82,63 @@ tp_write_model <- function(model, model_file_name = "tmp_model_file") {
 #' Build a TreePPL sampler for a given model and inference method
 #'
 #' @description
-#' `tp_compile()` compiles a TreePPL model and creates a sampler to be used by
-#' [tp_run()].
+#' `tp_sampler()` compiles a TreePPL model with the chosen inference method
+#' and returns a sampler that can be run with [tp_run()]. The model is
+#' compiled once; the sampler can then be run many times, with different data
+#' or runtime options, without compiling again.
 #'
 #' @param model One of three options:
-#'   * The full path of a JSON file that contains the TreePPL code, OR
-#'   * A string with the name of a model supported by treepplr
-#'     (see [tp_model_library()]), OR
-#'   * A string containing the entire TreePPL code.
-#' @param method Inference method to be used. See
+#'   * the path to a `.tppl` file with the TreePPL code, OR
+#'   * the name of a model in the TreePPL model library (see
+#'     [tp_model_library()]), e.g. `"crbd"`, OR
+#'   * a string containing the entire TreePPL code.
+#'
+#'   These are tried in this order: an existing file first, then a library
+#'   model, and otherwise the string is treated as code.
+#' @param method Inference method to compile the model with. See
 #'   `tp_treeppl_options("methods")` for all supported methods.
 #' @param ... Compile options, as `name = value` pairs or a single list (see
 #'   [tp_list()]). See `tp_treeppl_options("compile")` for all supported
-#'   arguments. Names are written without `--`, and underscores are converted to
+#'   options. Names are written without `--`, and underscores are converted to
 #'   hyphens (e.g., `incremental_printing = TRUE` becomes
-#'   `--incremental-printing`). Runtime options are not allowed here; pass them
-#'   to [tp_run()] instead.
+#'   `--incremental-printing`). Runtime options are not allowed here; pass
+#'   them to [tp_run()] instead.
 #'
-#' @return A TreePPL sampler object (class `tppls`).
+#' @return Invisibly, a list of class `tpSampler` with elements:
+#'   * `exe_path`: path to the compiled sampler executable.
+#'   * `model_path`: path to the `.tppl` file that was compiled.
+#'   * `method`: the inference method.
+#'   * `compile_opt`: the compile options used, as a named list.
+#'
+#' @seealso [tp_run()] to run the sampler, [tp_list()] to collect options,
+#'   [tp_treeppl_options()] for the available methods and options.
+#'
 #' @export
 #'
 #' @examples
 #' \dontrun{
-#' sampler <- tp_compile(
+#' # Library model, SMC with aligned resampling and pruning
+#' sampler <- tp_sampler(
 #'   model = "crbd",
 #'   method = "smc-bpf",
 #'   resample = "align",
 #'   prune = TRUE
 #' )
+#'
+#' # Your own model file, default method (MCMC)
+#' sampler <- tp_sampler(model = "path/to/my_model.tppl")
 #' }
-tp_compile <- function(model, method = "mcmc", ...) {
+tp_sampler <- function(model, method = "mcmc", ...) {
   if (!is.character(model) || length(model) != 1) {
-    stop("Input has to be a string.")
+    cli::cli_abort(
+      "{.arg model} must be a single string: a file path, model name or code."
+    )
   }
 
   opts <- .list_to_options(c(list(method = method), tp_list(...)))
   if (length(opts$runtime) > 0) {
     cli::cli_abort(c(
-      "Runtime options can't be given to {.fn tp_compile}: {.arg {names(opts$runtime)}}.",
+      "Runtime options can't be given to {.fn tp_sampler}: {.arg {names(opts$runtime)}}.",
       "i" = "Pass them to {.fn tp_run} instead."
     ))
   }
@@ -140,14 +159,18 @@ tp_compile <- function(model, method = "mcmc", ...) {
     }
   }
 
-  sampler <- methods::new("tppls", model_path = model_path)
-  sampler$compile_options <- c(opts$compile, model = model)
-  sampler$exe_path <- .compilation(
-    sampler$model_path,
-    .options_to_string(opts$compile)
+  out <- structure(
+    list(
+      exe_path = .compilation(model_path, .options_to_string(opts$compile)),
+      model_path = model_path,
+      method = method,
+      compile_opt = opts$compile
+    ),
+    class = "tpSampler"
   )
 
-  sampler
+  print(out)
+  invisible(out)
 }
 
 
@@ -381,4 +404,40 @@ tp_compile <- function(model, method = "mcmc", ...) {
   }
 
   output_path
+}
+
+
+# Printing Methods ------------------------------------------------------------------
+
+#' Print a TreePPL sampler
+#'
+#' Console method for objects returned by [tp_sampler()]. It shows the path to
+#' the compiled executable, the model file, the inference method and, if any,
+#' the compile options.
+#'
+#' @param x An object of class `tpSampler`.
+#' @param ... Not used; present for compatibility with [print()].
+#'
+#' @return `x`, invisibly.
+#'
+#' @export
+print.tpSampler <- function(x, ...) {
+  cli::cli_h2("{cli::symbol$tick} TreePPL Sampler")
+  cli::cli_text("Executable: {.path {x$exe_path}}")
+  cli::cli_text("Model file: {.path {x$model_path}}")
+  cli::cli_text("Method: {.val {x$method}}")
+
+  if (length(x$compile_opt) > 0) {
+    opts <- paste0(
+      names(x$compile_opt), " = ",
+      vapply(
+        x$compile_opt,
+        function(v) paste(format(v), collapse = ", "),
+        character(1)
+      )
+    )
+    cli::cli_text("Compile options: {.code {opts}}")
+  }
+
+  invisible(x)
 }

@@ -162,6 +162,7 @@ tp_sampler <- function(model, method = "mcmc", ...) {
   out <- structure(
     list(
       exe_path = .compilation(model_path, .options_to_string(opts$compile)),
+      model = tools::file_path_sans_ext(basename(model)),
       model_path = model_path,
       method = method,
       compile_opt = opts$compile

@@ -60,8 +60,10 @@ tp_run <- function(
 ) {
   start <- Sys.time()
 
-  if (!methods::is(sampler, "tppls")) {
-    cli::cli_abort("{.arg sampler} must be a sampler created by {.fn tp_compile}.")
+  data <- data$data_path
+
+  if (!methods::is(sampler, "tpSampler")) {
+    cli::cli_abort("{.arg sampler} must be a sampler created by {.fn tp_sampler}.")
   }
   if (!.is_count(n_runs)) {
     cli::cli_abort("{.arg n_runs} must be a single positive whole number.")
@@ -89,8 +91,8 @@ tp_run <- function(
     n_processes = n_processes
   )
 
-  model <- sampler$compile_options$model
-  method <- sampler$compile_options$method
+  model <- sampler$model
+  method <- sampler$method
 
   if (verbose) {
     .print_run_summary(

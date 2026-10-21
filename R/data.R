@@ -9,7 +9,7 @@ tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
     model_specs <- tp_expected_input(model)
   )
 
-  ## TREES ----
+  ## TREES
   # Convert object of class phylo to TreePPL tree types. NB: This won't work if a model
   # takes more than one tree as input.
   tree_type <- model_specs$expect_types
@@ -93,8 +93,7 @@ tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
   # Replace the <phylo> tree with the correct TPPL tree
   dataList[["tree"]] <- tree_user
 
-  ## WRITE THE JSON ----
-
+  ## JSON
   # File name: same data gets same name, different data gets different name
   if (is.null(filename)) {
     hash <- digest::digest(dataList, algo = "sha256")
@@ -104,16 +103,58 @@ tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
     )
   }
 
+  # Output List
+  out <- structure(
+    list(
+      data_path = filename,
+      model_name = model_specs$model_name,
+      expect_args = model_specs$expect_args,
+      expect_types = model_specs$expect_types,
+      expect_class = vapply(
+        model_specs$expect_types,
+        .tppl_type_to_r_class,
+        character(1),
+        tree_type = tree_type,
+        USE.NAMES = FALSE
+      )
+    ),
+    class = "tpData"
+  )
+
   # Write JSON file
-  tp_write_tppl_json(x = dataList, file = filename)
+  suppressMessages(tp_write_tppl_json(x = dataList, file = filename))
 
   # Check
   if (check) {
     tp_input_check(json = filename, tppl = model_specs$model_file)
+    return(invisible(out))
   }
 
-  filename
+  print(out)
+  invisible(out)
 }
+
+# Print method
+print.tpData <- function(x, ...) {
+  cli::cli_h2("Data Input")
+  cli::cli_text("Data file: {.val {x$data_path}}")
+  cli::cli_text("Model: {.val {x$model_name}}")
+
+  if (length(x$expect_args) == 0) {
+    cli::cli_text(
+      "Expected arguments: none (write an empty JSON object, {.code {{}}})"
+    )
+    return(invisible(x))
+  }
+
+  lines <- cli::col_cyan(paste0(x$expect_args, " (", x$expect_class, ")"))
+  cli::cli_text("Arguments: {lines}")
+  cli::cli_end()
+
+  invisible(x)
+}
+
+
 
 
 

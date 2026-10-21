@@ -201,50 +201,6 @@ tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
   invisible(out)
 }
 
-#' Print the JSON input of a TreePPL model
-#'
-#' Console method for objects returned by [tp_data()]. It shows the path to
-#' the JSON file, the model name and the arguments written to the file, with
-#' the R object each one was built from.
-#'
-#' @param x An object of class `tpData`.
-#' @param ... Not used; present for compatibility with [print()].
-#'
-#' @return `x`, invisibly.
-#'
-#' @export
-print.tpData <- function(x, ...) {
-  cli::cli_h2("Data Input")
-  cli::cli_text("Data file: {.val {x$data_path}}")
-  cli::cli_text("Model: {.val {x$model_name}}")
-
-  if (length(x$expect_args) == 0) {
-    cli::cli_text(
-      "Expected arguments: none (write an empty JSON object, {.code {{}}})"
-    )
-    return(invisible(x))
-  }
-
-  lines <- cli::col_cyan(paste0(x$expect_args, " (", x$expect_class, ")"))
-  cli::cli_text("Arguments: {lines}")
-  cli::cli_end()
-
-  invisible(x)
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #' List the input arguments a TreePPL model expects
 #'
 #' Scans a `.tppl` file, finds its `model function` signature and reports the
@@ -957,6 +913,37 @@ print.tpIcheck <- function(x, ...) {
     }
     cli::cli_alert_info("See {.run tp_expected_input(\"{x$model_file}\")}.")
   }
+
+  invisible(x)
+}
+
+#' Print the JSON input of a TreePPL model
+#'
+#' Console method for objects returned by [tp_data()]. It shows the path to
+#' the JSON file, the model name and the arguments written to the file, with
+#' the R object each one was built from.
+#'
+#' @param x An object of class `tpData`.
+#' @param ... Not used; present for compatibility with [print()].
+#'
+#' @return `x`, invisibly.
+#'
+#' @export
+print.tpData <- function(x, ...) {
+  cli::cli_h2("Data Input")
+  cli::cli_text("Data file: {.val {x$data_path}}")
+  cli::cli_text("Model: {.val {x$model_name}}")
+
+  if (length(x$expect_args) == 0) {
+    cli::cli_text(
+      "Expected arguments: none (write an empty JSON object, {.code {{}}})"
+    )
+    return(invisible(x))
+  }
+
+  lines <- cli::col_cyan(paste0(x$expect_args, " (", x$expect_class, ")"))
+  cli::cli_text("Arguments: {lines}")
+  cli::cli_end()
 
   invisible(x)
 }

@@ -203,10 +203,10 @@ tp_sampler <- function(model, method = "mcmc", ...) {
 #' @return A character vector of the same length as `placeholder`.
 #' @noRd
 .value_type <- function(placeholder) {
-  numeric_types <- c(INT = "integer", N = "integer", FLOAT = "number")
+  numeric_types <- c(INT = "integer", N = "integer", FLOAT = "numeric")
 
   type <- unname(numeric_types[placeholder])
-  type[is.na(type)] <- "string"
+  type[is.na(type)] <- "character"
   type[placeholder == ""] <- "logical"
   type
 }

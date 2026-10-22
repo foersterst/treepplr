@@ -56,7 +56,7 @@ tp_treeppl_options <- function(what = c("all", "methods", "compile", "runtime"))
       labels <- paste0(labels, " = <", section$value, ">")
     }
     cli::cli_h1(.option_headers[[t]])
-    cli::cli_dl(stats::setNames(section$description, cli::col_green(labels)))
+    cli::cli_dl(stats::setNames(section$description, cli::col_yellow(labels)))
   }
 
   invisible(opts)

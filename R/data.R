@@ -92,14 +92,14 @@ tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
   }
 
   # Every tree that is not a QTTree must be of class phylo
-  if (tree_type != "QTTree" && !inherits(dataList[["tree"]], "phylo")) {
+  if (length(tree_type) > 0 && tree_type != "QTTree" && !inherits(dataList[["tree"]], "phylo")) {
     cli::cli_abort(c(
       "x" = "Model {.val {model}} requires a tree of class {.cls phylo}"
     ))
   }
 
   # A QTTree cannot be converted directly here, it must be created externally
-  if (tree_type == "QTTree" && inherits(dataList[["tree"]], "phylo")) {
+  if (length(tree_type) > 0 && tree_type == "QTTree" && inherits(dataList[["tree"]], "phylo")) {
     cli::cli_abort(c(
       "x" = "Argument {.arg tree} of model {.val {model}} must be a {.cls QTTree}.",
       "i" = "See the examples in {.run ?tp_phylo_to_tppl()} for how to build one."
@@ -111,11 +111,11 @@ tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
   # If the TPPL expects a type:
 
   # <Tree> or <ClockTree>
-  if (tree_type == "Tree" || tree_type == "ClockTree") {
+  if (length(tree_type) > 0 && (tree_type == "Tree" || tree_type == "ClockTree")) {
     tree_user <- tp_phylo_to_tppl(phy = tree_user)
 
     # <TreeLabeled>
-  } else if (tree_type == "TreeLabeled") {
+  } else if (length(tree_type) > 0 && tree_type == "TreeLabeled") {
     tree_user <- tp_phylo_to_tppl(
       phy = tree_user,
       leaf_extra = function(i) list(label = i),
@@ -123,7 +123,7 @@ tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
     )
 
     # <GTR_Tree>
-  } else if (tree_type == "GTR_Tree") {
+  } else if (length(tree_type) > 0 && tree_type == "GTR_Tree") {
     tip_labels <- tree_user$tip.label
     dna_int <- dataList[["data"]]
     tip_row <- match(tip_labels, rownames(dna_int))

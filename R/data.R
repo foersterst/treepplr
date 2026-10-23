@@ -81,7 +81,9 @@ tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
   # takes more than one tree as input.
   tree_type <- model_specs$expect_types
   tree_type <- tree_type[grepl("Tree", tree_type, ignore.case = TRUE)]
-  tree_user <- dataList[["tree"]]
+  arg_names <- names(dataList)
+  tree_arg <- arg_names[grepl("Tree", arg_names, ignore.case = TRUE)]
+  tree_user <- dataList[[tree_arg]]
 
   # If the model requires a tree but the user do not provide one
   if (length(tree_type) > 0 && is.null(tree_user)) {
@@ -92,14 +94,14 @@ tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
   }
 
   # Every tree that is not a QTTree must be of class phylo
-  if (length(tree_type) > 0 && tree_type != "QTTree" && !inherits(dataList[["tree"]], "phylo")) {
+  if (length(tree_type) > 0 && tree_type != "QTTree" && !inherits(dataList[[tree_arg]], "phylo")) {
     cli::cli_abort(c(
       "x" = "Model {.val {model}} requires a tree of class {.cls phylo}"
     ))
   }
 
   # A QTTree cannot be converted directly here, it must be created externally
-  if (length(tree_type) > 0 && tree_type == "QTTree" && inherits(dataList[["tree"]], "phylo")) {
+  if (length(tree_type) > 0 && tree_type == "QTTree" && inherits(dataList[[tree_arg]], "phylo")) {
     cli::cli_abort(c(
       "x" = "Argument {.arg tree} of model {.val {model}} must be a {.cls QTTree}.",
       "i" = "See the examples in {.run ?tp_phylo_to_tppl()} for how to build one."
@@ -158,7 +160,7 @@ tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
   }
 
   # Replace the <phylo> tree with the correct TPPL tree
-  dataList[["tree"]] <- tree_user
+  dataList[[tree_arg]] <- tree_user
 
   ## JSON
   # File name: same data gets same name, different data gets different name

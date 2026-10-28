@@ -71,98 +71,22 @@ tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
     cli::cli_abort("{.arg dataList} must be a named list.")
   }
 
-  # Expected arguments (the order doesn't matter)
+  # if dataList contains a tree of class phylo
+  is_phylo <- vapply(dataList, inherits, logical(1), what = "phylo")
+  if (any(is_phylo)) {
+    phylo_args <- names(dataList)[is_phylo]
+    cli::cli_abort(c(
+      "{.arg dataList} can't contain a {.cls phylo} object.",
+      "x" = "{cli::qty(phylo_args)}Element{?s} {.val {phylo_args}} {?is a/are} {.cls phylo}.",
+      "i" = "Convert it to class {.cls tpPhylo} with {.fn tp_phylo_to_tppl} first."
+    ))
+  }
+
+  # Expected arguments
   suppressMessages(
     model_specs <- tp_expected_input(model)
   )
 
-  ## TREES
-  # Convert object of class phylo to TreePPL tree types. NB: This won't work if a model
-  # takes more than one tree as input.
-  tree_type <- model_specs$expect_types
-  tree_type <- tree_type[grepl("Tree", tree_type, ignore.case = TRUE)]
-  arg_names <- names(dataList)
-  tree_arg <- arg_names[grepl("Tree", arg_names, ignore.case = TRUE)]
-  tree_user <- dataList[[tree_arg]]
-
-  # If the model requires a tree but the user do not provide one
-  if (length(tree_type) > 0 && is.null(tree_user)) {
-    cli::cli_abort(c(
-      "x" = "Tree not found.",
-      "i" = "Argument {.arg dataList} must contain a phylogenetic tree."
-    ))
-  }
-
-  # Every tree that is not a QTTree must be of class phylo
-  if (length(tree_type) > 0 && tree_type != "QTTree" && !inherits(dataList[[tree_arg]], "phylo")) {
-    cli::cli_abort(c(
-      "x" = "Model {.val {model}} requires a tree of class {.cls phylo}"
-    ))
-  }
-
-  # A QTTree cannot be converted directly here, it must be created externally
-  if (length(tree_type) > 0 && tree_type == "QTTree" && inherits(dataList[[tree_arg]], "phylo")) {
-    cli::cli_abort(c(
-      "x" = "Argument {.arg tree} of model {.val {model}} must be a {.cls QTTree}.",
-      "i" = "See the examples in {.run ?tp_phylo_to_tppl()} for how to build one."
-    ))
-  }
-
-  ## CONVERTING R TREES TO TPPL TREES ##
-
-  # If the TPPL expects a type:
-
-  # <Tree> or <ClockTree>
-  if (length(tree_type) > 0 && (tree_type == "Tree" || tree_type == "ClockTree")) {
-    tree_user <- tp_phylo_to_tppl(phy = tree_user)
-
-    # <TreeLabeled>
-  } else if (length(tree_type) > 0 && tree_type == "TreeLabeled") {
-    tree_user <- tp_phylo_to_tppl(
-      phy = tree_user,
-      leaf_extra = function(i) list(label = i),
-      node_extra = function(i) list(label = i)
-    )
-
-    # <GTR_Tree>
-  } else if (length(tree_type) > 0 && tree_type == "GTR_Tree") {
-    tip_labels <- tree_user$tip.label
-    dna_int <- dataList[["data"]]
-    tip_row <- match(tip_labels, rownames(dna_int))
-
-    if (all(is.na(tip_row))) {
-      cli::cli_abort(c(
-        "No tip label of {.arg tree} matches a row name of {.arg data}.",
-        "i" = paste(
-          "Tips: {.val {utils::head(tip_labels, 3)}};",
-          "rows: {.val {utils::head(rownames(dna_int), 3)}}."
-        )
-      ))
-    }
-
-    if (anyNA(tip_row)) {
-      missing_tips <- tip_labels[is.na(tip_row)]
-      cli::cli_abort(c(
-        "Every tip of {.arg tree} must have a sequence in {.arg data}.",
-        "x" = "{cli::qty(missing_tips)}Tip{?s} not found: {.val {missing_tips}}."
-      ))
-    }
-
-    # GTR_Tree
-    tree_user <- tp_phylo_to_tppl(
-      phy = tree_user,
-      leaf_extra = function(i) list(index = tip_row[i])
-    )
-
-    # Unnamed matrix
-    storage.mode(dna_int) <- "integer" # JSON gets 0, not 0.0
-    dataList[["data"]] <- unname(dna_int)
-  }
-
-  # Replace the <phylo> tree with the correct TPPL tree
-  dataList[[tree_arg]] <- tree_user
-
-  ## JSON
   # File name: same data gets same name, different data gets different name
   if (is.null(filename)) {
     hash <- digest::digest(dataList, algo = "sha256")
@@ -186,7 +110,7 @@ tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
         model_specs$expect_types,
         .tppl_type_to_r_class,
         character(1),
-        tree_type = tree_type,
+        #tree_type = "tpPhylo",
         USE.NAMES = FALSE
       )
     ),
@@ -268,7 +192,6 @@ tp_expected_input <- function(tppl) {
 
   code <- .read_tppl_code(tppl)
   signature <- .parse_model_signature(code, tppl)
-  tree_types <- .find_tree_types(tppl)
 
   out <- structure(
     list(
@@ -281,7 +204,6 @@ tp_expected_input <- function(tppl) {
         signature$args$type,
         .tppl_type_to_r_class,
         character(1),
-        tree_types = tree_types,
         USE.NAMES = FALSE
       )
     ),
@@ -760,8 +682,12 @@ tp_input_check <- function(json, tppl) {
 }
 
 #' Translate a TreePPL type into the R object a user should supply
+#'
+#' Tree types are recognised by name: the known ones (`ClockTree`, its alias
+#' `Tree`, `TreeLabeled`, `GTR_Tree`, `QTTree`) and any other type whose name
+#' contains "Tree". All of them map to "tpPhylo".
 #' @noRd
-.tppl_type_to_r_class <- function(type, tree_types) {
+.tppl_type_to_r_class <- function(type) {
   # Count trailing "[]" pairs: Real[][] -> base "Real", 2 dimensions
   n_dims <- 0
   base <- type
@@ -779,26 +705,31 @@ tp_input_check <- function(json, tppl) {
 
   if (base %in% names(atomic)) {
     r_base <- atomic[[base]]
-    return(switch(as.character(min(n_dims, 2)),
-      "0" = r_base,
-      "1" = paste(r_base, "vector"),
-      "2" = paste(r_base, "matrix")
-    ))
+    return(
+      switch(as.character(min(n_dims, 2)),
+        "0" = r_base,
+        "1" = paste(r_base, "vector"),
+        "2" = paste(r_base, "matrix")
+      )
+    )
   }
 
   if (grepl("^Matrix\\[", base)) {
     return(if (n_dims == 0) "matrix" else "list of matrices")
   }
 
-  # QTTreees are very specific tree types that cannot be produced directly by tp_data().
-  # Building one from a ape::phylo object is possible via tp_phylo_to_tppl(), but that
-  # requires additional arguments (objects) that are not listed in tp_expected_input("qt").
-  # I will write a short vignette on how to build QTTrees.
-  if (base == "QTTree") {
-    return("QTTree")
-  }
-  if (base != "QTTree" && base %in% tree_types) {
-    return("phylo")
+  # Any TreePPL tree type: the user supplies a tree built with
+  # tp_phylo_to_tppl() (class "tpPhylo")
+  known_trees <- c(
+    "Tree",
+    "ClockTree",
+    "TreeLabeled",
+    "GTR_Tree",
+    "QTTree"
+  )
+
+  if (base %in% known_trees || grepl("Tree", base, fixed = TRUE)) {
+    return(if (n_dims == 0) "tpPhylo" else "list of tpPhylo")
   }
 
   # Records and other user-defined types: show the TreePPL type itself

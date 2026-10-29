@@ -5,14 +5,16 @@
 \title{Parse TreePPL SMC output into a tidy data frame}
 \usage{
 tp_parse_smc(json_path, wide = TRUE)
+
+tp_parse_smc(json_path, wide = TRUE)
 }
 \arguments{
-\item{json_path}{The full path to the (SMC) JSON file produced by TreePPL.}
+\item{json_path}{Path(s) to one or more JSON output files, as returned by
+\code{\link[=tp_run]{tp_run()}}. Sweeps are numbered consecutively across files.}
 
-\item{wide}{Logical. If \code{TRUE} (default), return the data frame in wide format,
-with one column per parameter. If \code{FALSE}, return the data frame in long format,
-with parameter names and values stored in \code{parameter}
-and \code{sample} columns.}
+\item{wide}{Logical. If \code{TRUE} (default), one row per particle and one
+column per parameter. If \code{FALSE}, one row per particle and parameter, with
+columns \code{parameter} and \code{sample}.}
 }
 \value{
 A tibble with one row per particle, containing:
@@ -25,11 +27,46 @@ A tibble with one row per particle, containing:
 \item{norm_weight}{Normalized weight, rescaled so the maximum
 total log weight across all particles is 1.}
 }
+
+A tibble with columns:
+\itemize{
+\item \code{sweep}: sweep number.
+\item \code{particle}: particle number within its sweep.
+\item \code{log_weight}: the particle's log weight.
+\item \code{norm_constant}: the sweep's log normalising constant.
+\item \code{norm_weight}: the normalised weight (see Details).
+\item one column per parameter (\code{wide = TRUE}), or \code{parameter} and \code{sample}
+(\code{wide = FALSE}).
+}
 }
 \description{
 Converts a JSON file from an SMC analysis produced by TreePPL into a
 single tidy tibble of particles, their samples, and normalized weights.
 The function internally removes sweeps with an undefined normalizing constant.
+
+\code{tp_parse_smc()} reads the JSON output of a TreePPL run with a sequential
+Monte Carlo method (e.g. \code{"smc-bpf"}, \code{"smc-apf"}) and returns the samples,
+their weights and the normalising constant of each sweep as a tibble.
+}
+\details{
+Each line of an SMC output file is one sweep, with the particles' \code{samples},
+their log \code{weights} and the sweep's log normalising constant (\code{normConst}).
+TreePPL writes NaN and infinite values as \code{{"__float__": "-inf"}}; these are
+read as R's \code{NaN}, \code{Inf} and \code{-Inf}.
+
+Sweeps are skipped when they have no samples (every particle had zero
+weight) or a normalising constant that is NaN or \code{-Inf}; a message reports
+how many. Particles with a non-finite log weight are dropped. If no sweep
+has usable samples, the function stops with an error: try more particles,
+or check the input data and priors.
+
+The normalised weight of a particle is
+\code{exp(log_weight + norm_constant - max(log_weight + norm_constant))}, taken
+over all particles of all sweeps, so the heaviest particle gets weight 1.
+
+Parameters are named after the fields of the model's return type when the
+output has them (e.g. \code{lambda}, \code{mu}), and \code{x1}, \code{x2}, ... otherwise.
+Non-scalar values (vectors, trees) are kept as list-columns.
 }
 \examples{
 \dontrun{
@@ -55,4 +92,17 @@ out_file <- list.files(
 tp_parse_smc(json_path = out_file)
 }
 
+\dontrun{
+sampler <- tp_sampler(model = "crbd", method = "smc-bpf")
+data <- tp_data(model = "crbd", dataList = list(tree = tree, rho = 0.5))
+run <- tp_run(sampler, data, particles = 1000, sweeps = 10)
+
+# Parse an output file directly
+samples <- tp_parse_smc("out.json")
+samples_long <- tp_parse_smc("out.json", wide = FALSE)
+}
+}
+\seealso{
+\code{\link[=tp_run]{tp_run()}}, which calls this function for SMC runs, and
+\code{\link[=tp_parse_mcmc]{tp_parse_mcmc()}} for MCMC output.
 }

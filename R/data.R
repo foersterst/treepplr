@@ -3,47 +3,49 @@
 #' Write the JSON input file for a TreePPL model
 #'
 #' @description
-#' `tp_data()` converts the R objects in `dataList` to the types a TreePPL
-#' model expects and writes them to a JSON file that can be passed to
-#' [tp_run()]. The written file is checked against the model with
-#' [tp_input_check()] unless `check = FALSE`.
+#' `tp_data()` writes the R objects in `data` to a JSON file that a TreePPL
+#' sampler can read, and checks the file against the model's arguments.
+#' Pass the result to [tp_run()].
 #'
 #' @details
-#' Each element of `dataList` must be named exactly like an argument of the
-#' model (see [tp_expected_input()]); the order does not matter.
+#' Each element of `data` must be named exactly like an argument of the model;
+#' the order does not matter. Use [tp_expected_input()] to see the names and
+#' the R object each argument expects.
 #'
-#' A tree must be given as `dataList$tree`, of class `phylo` (see
-#' [ape::read.tree()]). It is converted to the tree type the model expects:
+#' Trees must be given as `tpPhylo` objects, built from a `phylo` tree with
+#' [tp_phylo_to_tppl()]. A `phylo` object in `data` is not converted
+#' automatically and stops `tp_data()` with an error.
 #'
-#' | TreePPL tree type      | Extra fields added to the tree              |
-#' |------------------------|---------------------------------------------|
-#' | `Tree`, `ClockTree`    | none                                        |
-#' | `TreeLabeled`          | a `label` on every leaf and node            |
-#' | `GTR_Tree`             | an `index` on every leaf (its row in `data`) |
-#' | `QTTree`               | not converted: build it with [tp_phylo_to_tppl()] |
+#' The file is written with the settings TreePPL needs: values of length 1
+#' become plain JSON values, numbers keep full precision, and matrices are
+#' written row by row.
 #'
-#' For a `GTR_Tree`, `dataList$data` must be an integer matrix with taxa in
-#' rows, sites in columns and taxon names as row names (see
-#' [tp_dna_to_int()]). Every tip label of the tree must match a row name.
-#'
-#' @param model Path to the `.tppl` model file.
-#' @param dataList A named list with one element per model argument.
+#' @param model Name of a model in the TreePPL model library (see
+#'   [tp_model_library()]), e.g. `"crbd"`, or the path to a `.tppl` model
+#'   file.
+#' @param data A named list with one element per model argument.
 #' @param filename Path of the JSON file to write. If `NULL` (default), the
 #'   file is written to [tp_tempdir()] and named after the model and a hash of
-#'   the data, so the same data always gets the same file name and different
-#'   data a different one.
+#'   `data`, so the same data always gets the same file name and different data
+#'   a different one.
 #' @param check Logical. If `TRUE` (default), check the written file against
 #'   the model with [tp_input_check()] and print the result.
+#' @param print Logical. If `TRUE` (default), print a summary of the input
+#'   file: its path, the model and the arguments it expects.
 #'
 #' @return Invisibly, a list of class `tpData` with elements:
 #'   * `data_path`: path to the JSON file.
-#'   * `model_name`: the model's name (file name without `.tppl`).
+#'   * `model_name`: the model's name.
 #'   * `expect_args`: the model's argument names, in signature order.
 #'   * `expect_types`: the TreePPL type of each argument.
 #'   * `expect_class`: the R object expected for each argument.
 #'
+#'   Typing the object at the console prints its summary again (see
+#'   [print.tpData()]).
+#'
 #' @seealso [tp_expected_input()] for the arguments a model expects,
-#'   [tp_input_check()], [tp_run()].
+#'   [tp_phylo_to_tppl()] to build trees, [tp_run()] to run a sampler on the
+#'   file.
 #'
 #' @export
 #'
@@ -51,45 +53,48 @@
 #' \dontrun{
 #' phy <- ape::read.tree(text = "((A:4,B:4):6,(C:7,D:7):3);")
 #'
-#' # Diversification model: tree (phylo) and sampling fraction
-#' k <- tp_data(
-#'   model = "models/diversification/crbd.tppl",
-#'   dataList = list(tree = phy, rho = 0.5)
+#' # Diversification model: a tree and the sampling fraction
+#' d <- tp_data(
+#'   model = "crbd",
+#'   data = list(tree = tp_phylo_to_tppl(phy), rho = 0.5)
 #' )
-#' k            # prints the summary again
-#' k$data_path  # path to the JSON file
+#' d            # prints the summary again
+#' d$data_path  # path to the JSON file
 #'
-#' # Fixed-tree GTR model: integer alignment with taxon names as row names
-#' aln <- ape::read.FASTA("alignment.fasta")
-#' k <- tp_data(
-#'   model = "models/tree-inference/substmodel_belief_propagation.tppl",
-#'   dataList = list(data = tp_dna_to_int(aln), tree = phy)
+#' # Write to a chosen file, without the check or the summary
+#' d <- tp_data(
+#'   model = "crbd",
+#'   data = list(tree = tp_phylo_to_tppl(phy), rho = 0.5),
+#'   filename = "crbd_input.json",
+#'   check = FALSE,
+#'   print = FALSE
 #' )
 #' }
-tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
-  if (!is.list(dataList) || (length(dataList) > 0 && is.null(names(dataList)))) {
-    cli::cli_abort("{.arg dataList} must be a named list.")
+tp_data <- function(model, data, filename = NULL, check = TRUE, print = TRUE) {
+  if (!is.list(data) || (length(data) > 0 && is.null(names(data)))) {
+    cli::cli_abort("{.arg data} must be a named list.")
   }
 
-  # if dataList contains a tree of class phylo
-  is_phylo <- vapply(dataList, inherits, logical(1), what = "phylo")
+  # check if there are trees in the <phylo> format in the data
+  is_phylo <- vapply(data, inherits, logical(1), what = "phylo")
+
   if (any(is_phylo)) {
-    phylo_args <- names(dataList)[is_phylo]
+    phylo_args <- names(data)[is_phylo]
     cli::cli_abort(c(
-      "{.arg dataList} can't contain a {.cls phylo} object.",
+      "{.arg data} can't contain a {.cls phylo} object.",
       "x" = "{cli::qty(phylo_args)}Element{?s} {.val {phylo_args}} {?is a/are} {.cls phylo}.",
-      "i" = "Convert it to class {.cls tpPhylo} with {.fn tp_phylo_to_tppl} first."
+      "i" = "Convert it with {.fn tp_phylo_to_tppl} first."
     ))
   }
 
-  # Expected arguments
+  # Collect expected arguments
   suppressMessages(
     model_specs <- tp_expected_input(model)
   )
 
   # File name: same data gets same name, different data gets different name
   if (is.null(filename)) {
-    hash <- digest::digest(dataList, algo = "sha256")
+    hash <- digest::digest(data, algo = "sha256")
     filename <- file.path(
       tp_tempdir(),
       paste0("input-", model, "-", substr(hash, 1, 7), ".json")
@@ -97,7 +102,7 @@ tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
   }
 
   # Write JSON file
-  suppressMessages(tp_write_tppl_json(x = dataList, file = filename))
+  suppressMessages(tp_write_tppl_json(x = data, file = filename))
 
   # Output List
   out <- structure(
@@ -110,14 +115,13 @@ tp_data <- function(model, dataList, filename = NULL, check = TRUE) {
         model_specs$expect_types,
         .tppl_type_to_r_class,
         character(1),
-        #tree_type = "tpPhylo",
         USE.NAMES = FALSE
       )
     ),
     class = "tpData"
   )
 
-  print(out)
+  if (print) print(out)
 
   # Check
   if (check) {
@@ -288,7 +292,10 @@ tp_write_tppl_json <- function(x, file) {
 #' @param node_extra A function of one internal node number returning a named
 #'   list of extra node fields.
 #'
-#' @return A nested list ready for [tp_write_tppl_json()].
+#' @return A nested list of class `tpPhylo`, ready for [tp_data()] and
+#'   [tp_write_tppl_json()]. The tip labels of `phy` are kept in the
+#'   attribute `"tip.label"`, in ape's tip order; they are not written to
+#'   JSON. See [print.tpPhylo()] for the console output.
 #'
 #' @export
 #'
@@ -297,6 +304,7 @@ tp_write_tppl_json <- function(x, file) {
 #'
 #' # ClockTree (diversification models)
 #' tree <- tp_phylo_to_tppl(phy)
+#' tree
 #'
 #' # TreeLabeled (host-repertoire models): a label on every leaf and node
 #' tree_labeled <- tp_phylo_to_tppl(
@@ -350,7 +358,13 @@ tp_phylo_to_tppl <- function(
     list("__constructor__" = node_ctor, "__data__" = data)
   }
 
-  build(n_tips + 1) # in ape, the root is node number n_tips + 1
+  # The root is ape node number n_tips + 1. The class goes on the outer list
+  # only; "list" second, so jsonlite still writes it as a plain JSON object.
+  structure(
+    build(n_tips + 1),
+    class = c("tpPhylo", "list"),
+    tip.label = phy$tip.label
+  )
 }
 
 #' Convert a DNA alignment into a TreePPL integer matrix
@@ -773,6 +787,53 @@ tp_input_check <- function(json, tppl) {
   if (is.null(names(input))) character(0) else names(input)
 }
 
+#' Summarise a TreePPL tree by walking it once
+#'
+#' Collects the number of tips and internal nodes, the root age, the range of
+#' tip ages, the constructor names and the extra fields (everything in
+#' `__data__` other than `age`, `left` and `right`).
+#' @noRd
+.tp_tree_summary <- function(tree) {
+  tip_ages <- numeric(0)
+  n_nodes <- 0
+  leaf_ctor <- node_ctor <- character(0)
+  leaf_fields <- node_fields <- character(0)
+
+  walk <- function(node) {
+    data <- node[["__data__"]]
+    ctor <- node[["__constructor__"]]
+
+    if (is.null(data$left) || is.null(data$right)) {
+      tip_ages <<- c(tip_ages, data$age)
+      leaf_ctor <<- union(leaf_ctor, ctor)
+      leaf_fields <<- union(leaf_fields, setdiff(names(data), "age"))
+      return(invisible())
+    }
+
+    n_nodes <<- n_nodes + 1
+    node_ctor <<- union(node_ctor, ctor)
+    node_fields <<- union(
+      node_fields, setdiff(names(data), c("age", "left", "right"))
+    )
+    walk(data$left)
+    walk(data$right)
+  }
+
+  walk(tree)
+
+  list(
+    n_tips = length(tip_ages),
+    n_nodes = n_nodes,
+    root_age = tree[["__data__"]]$age,
+    min_tip_age = min(tip_ages),
+    max_tip_age = max(tip_ages),
+    leaf_ctor = leaf_ctor,
+    node_ctor = node_ctor,
+    leaf_fields = leaf_fields,
+    node_fields = node_fields
+  )
+}
+
 # Printing Methods ------------------------------------------------------------------
 
 #' Print the expected input of a TreePPL model
@@ -880,3 +941,30 @@ print.tpData <- function(x, ...) {
 
   invisible(x)
 }
+
+#' Print a TreePPL tree
+#'
+#' Console method for objects returned by [tp_phylo_to_tppl()]. Like ape's
+#' `print.phylo()`, it gives the number of tips and internal nodes and the
+#' root age.
+#'
+#' @param x An object of class `tpPhylo`.
+#' @param ... Not used; present for compatibility with [print()].
+#'
+#' @return `x`, invisibly.
+#'
+#' @export
+print.tpPhylo <- function(x, ...) {
+  info <- .tp_tree_summary(x)
+  root_age <- signif(info$root_age, 6)
+
+  cli::cli_text(
+    "Phylogenetic tree of class {.cls tpPhylo}, with {info$n_tips} tip{?s} ",
+    "and {info$n_nodes} internal node{?s}."
+  )
+  cli::cli_text("")
+  cli::cli_text("Rooted; includes branch lengths; root age = {root_age}.")
+
+  invisible(x)
+}
+

@@ -4,76 +4,81 @@
 \alias{tp_data}
 \title{Write the JSON input file for a TreePPL model}
 \usage{
-tp_data(model, dataList, filename = NULL, check = TRUE)
+tp_data(model, data, filename = NULL, check = TRUE, print = TRUE)
 }
 \arguments{
-\item{model}{Path to the \code{.tppl} model file.}
+\item{model}{Name of a model in the TreePPL model library (see
+\code{\link[=tp_model_library]{tp_model_library()}}), e.g. \code{"crbd"}, or the path to a \code{.tppl} model
+file.}
 
-\item{dataList}{A named list with one element per model argument.}
+\item{data}{A named list with one element per model argument.}
 
 \item{filename}{Path of the JSON file to write. If \code{NULL} (default), the
 file is written to \code{\link[=tp_tempdir]{tp_tempdir()}} and named after the model and a hash of
-the data, so the same data always gets the same file name and different
-data a different one.}
+\code{data}, so the same data always gets the same file name and different data
+a different one.}
 
 \item{check}{Logical. If \code{TRUE} (default), check the written file against
 the model with \code{\link[=tp_input_check]{tp_input_check()}} and print the result.}
+
+\item{print}{Logical. If \code{TRUE} (default), print a summary of the input
+file: its path, the model and the arguments it expects.}
 }
 \value{
 Invisibly, a list of class \code{tpData} with elements:
 \itemize{
 \item \code{data_path}: path to the JSON file.
-\item \code{model_name}: the model's name (file name without \code{.tppl}).
+\item \code{model_name}: the model's name.
 \item \code{expect_args}: the model's argument names, in signature order.
 \item \code{expect_types}: the TreePPL type of each argument.
 \item \code{expect_class}: the R object expected for each argument.
 }
+
+Typing the object at the console prints its summary again (see
+\code{\link[=print.tpData]{print.tpData()}}).
 }
 \description{
-\code{tp_data()} converts the R objects in \code{dataList} to the types a TreePPL
-model expects and writes them to a JSON file that can be passed to
-\code{\link[=tp_run]{tp_run()}}. The written file is checked against the model with
-\code{\link[=tp_input_check]{tp_input_check()}} unless \code{check = FALSE}.
+\code{tp_data()} writes the R objects in \code{data} to a JSON file that a TreePPL
+sampler can read, and checks the file against the model's arguments.
+Pass the result to \code{\link[=tp_run]{tp_run()}}.
 }
 \details{
-Each element of \code{dataList} must be named exactly like an argument of the
-model (see \code{\link[=tp_expected_input]{tp_expected_input()}}); the order does not matter.
+Each element of \code{data} must be named exactly like an argument of the model;
+the order does not matter. Use \code{\link[=tp_expected_input]{tp_expected_input()}} to see the names and
+the R object each argument expects.
 
-A tree must be given as \code{dataList$tree}, of class \code{phylo} (see
-\code{\link[ape:read.tree]{ape::read.tree()}}). It is converted to the tree type the model expects:\tabular{ll}{
-   TreePPL tree type \tab Extra fields added to the tree \cr
-   \code{Tree}, \code{ClockTree} \tab none \cr
-   \code{TreeLabeled} \tab a \code{label} on every leaf and node \cr
-   \code{GTR_Tree} \tab an \code{index} on every leaf (its row in \code{data}) \cr
-   \code{QTTree} \tab not converted: build it with \code{\link[=tp_phylo_to_tppl]{tp_phylo_to_tppl()}} \cr
-}
+Trees must be given as \code{tpPhylo} objects, built from a \code{phylo} tree with
+\code{\link[=tp_phylo_to_tppl]{tp_phylo_to_tppl()}}. A \code{phylo} object in \code{data} is not converted
+automatically and stops \code{tp_data()} with an error.
 
-
-For a \code{GTR_Tree}, \code{dataList$data} must be an integer matrix with taxa in
-rows, sites in columns and taxon names as row names (see
-\code{\link[=tp_dna_to_int]{tp_dna_to_int()}}). Every tip label of the tree must match a row name.
+The file is written with the settings TreePPL needs: values of length 1
+become plain JSON values, numbers keep full precision, and matrices are
+written row by row.
 }
 \examples{
 \dontrun{
 phy <- ape::read.tree(text = "((A:4,B:4):6,(C:7,D:7):3);")
 
-# Diversification model: tree (phylo) and sampling fraction
-k <- tp_data(
-  model = "models/diversification/crbd.tppl",
-  dataList = list(tree = phy, rho = 0.5)
+# Diversification model: a tree and the sampling fraction
+d <- tp_data(
+  model = "crbd",
+  data = list(tree = tp_phylo_to_tppl(phy), rho = 0.5)
 )
-k            # prints the summary again
-k$data_path  # path to the JSON file
+d            # prints the summary again
+d$data_path  # path to the JSON file
 
-# Fixed-tree GTR model: integer alignment with taxon names as row names
-aln <- ape::read.FASTA("alignment.fasta")
-k <- tp_data(
-  model = "models/tree-inference/substmodel_belief_propagation.tppl",
-  dataList = list(data = tp_dna_to_int(aln), tree = phy)
+# Write to a chosen file, without the check or the summary
+d <- tp_data(
+  model = "crbd",
+  data = list(tree = tp_phylo_to_tppl(phy), rho = 0.5),
+  filename = "crbd_input.json",
+  check = FALSE,
+  print = FALSE
 )
 }
 }
 \seealso{
 \code{\link[=tp_expected_input]{tp_expected_input()}} for the arguments a model expects,
-\code{\link[=tp_input_check]{tp_input_check()}}, \code{\link[=tp_run]{tp_run()}}.
+\code{\link[=tp_phylo_to_tppl]{tp_phylo_to_tppl()}} to build trees, \code{\link[=tp_run]{tp_run()}} to run a sampler on the
+file.
 }

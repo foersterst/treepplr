@@ -28,7 +28,10 @@ extra leaf fields.}
 list of extra node fields.}
 }
 \value{
-A nested list ready for \code{\link[=tp_write_tppl_json]{tp_write_tppl_json()}}.
+A nested list of class \code{tpPhylo}, ready for \code{\link[=tp_data]{tp_data()}} and
+\code{\link[=tp_write_tppl_json]{tp_write_tppl_json()}}. The tip labels of \code{phy} are kept in the
+attribute \code{"tip.label"}, in ape's tip order; they are not written to
+JSON. See \code{\link[=print.tpPhylo]{print.tpPhylo()}} for the console output.
 }
 \description{
 Builds the nested list that TreePPL reads as a binary tree:
@@ -52,6 +55,7 @@ phy <- ape::read.tree(text = "((A:4,B:4):6,(C:7,D:7):3);")
 
 # ClockTree (diversification models)
 tree <- tp_phylo_to_tppl(phy)
+tree
 
 # TreeLabeled (host-repertoire models): a label on every leaf and node
 tree_labeled <- tp_phylo_to_tppl(

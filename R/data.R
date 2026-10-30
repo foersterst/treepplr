@@ -963,7 +963,7 @@ print.tpPhylo <- function(x, ...) {
     "and {info$n_nodes} internal node{?s}."
   )
   cli::cli_text("")
-  cli::cli_text("Rooted; includes branch lengths; root age = {root_age}.")
+  cli::cli_text("Rooted; includes branch lengths; root age = {root_age}")
 
   invisible(x)
 }

@@ -2,10 +2,8 @@
 % Please edit documentation in R/post-process.R
 \name{tp_parse_smc}
 \alias{tp_parse_smc}
-\title{Parse TreePPL SMC output into a tidy data frame}
+\title{Parse the output of a TreePPL SMC run}
 \usage{
-tp_parse_smc(json_path, wide = TRUE)
-
 tp_parse_smc(json_path, wide = TRUE)
 }
 \arguments{
@@ -17,17 +15,6 @@ column per parameter. If \code{FALSE}, one row per particle and parameter, with
 columns \code{parameter} and \code{sample}.}
 }
 \value{
-A tibble with one row per particle, containing:
-\describe{
-\item{sweep}{Sweep index.}
-\item{parameter}{Parameter name, if present in the input JSON.}
-\item{sample}{Sampled value.}
-\item{log_weight}{Log weight of the particle.}
-\item{norm_constant}{Log normalizing constant for the sweep.}
-\item{norm_weight}{Normalized weight, rescaled so the maximum
-total log weight across all particles is 1.}
-}
-
 A tibble with columns:
 \itemize{
 \item \code{sweep}: sweep number.
@@ -40,10 +27,6 @@ A tibble with columns:
 }
 }
 \description{
-Converts a JSON file from an SMC analysis produced by TreePPL into a
-single tidy tibble of particles, their samples, and normalized weights.
-The function internally removes sweeps with an undefined normalizing constant.
-
 \code{tp_parse_smc()} reads the JSON output of a TreePPL run with a sequential
 Monte Carlo method (e.g. \code{"smc-bpf"}, \code{"smc-apf"}) and returns the samples,
 their weights and the normalising constant of each sweep as a tibble.
@@ -69,29 +52,6 @@ output has them (e.g. \code{lambda}, \code{mu}), and \code{x1}, \code{x2}, ... o
 Non-scalar values (vectors, trees) are kept as list-columns.
 }
 \examples{
-\dontrun{
-# fit a CRBD model
-run_smc <- tp_run(
-  data = tp_data(data_input = "crbd"),
-  sampler = tp_compile(
-    model = "crbd",
-    method = "smc-apf"
-  ),
-  sweeps = 2,
-  particles = 10
-)
-
-# get the path to the output JSON file:
-out_file <- list.files(
-  path = tp_tempdir(),
-  pattern = "out",
-  full.names = TRUE
-)
-
-# parse JSON to a tidy data frame
-tp_parse_smc(json_path = out_file)
-}
-
 \dontrun{
 sampler <- tp_sampler(model = "crbd", method = "smc-bpf")
 data <- tp_data(model = "crbd", dataList = list(tree = tree, rho = 0.5))

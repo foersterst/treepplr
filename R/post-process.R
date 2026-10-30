@@ -1,163 +1,4 @@
-#' Parse TreePPL SMC output into a tidy data frame
-#'
-#' Converts a JSON file from an SMC analysis produced by TreePPL into a
-#' single tidy tibble of particles, their samples, and normalized weights.
-#' The function internally removes sweeps with an undefined normalizing constant.
-#'
-#' @param json_path The full path to the (SMC) JSON file produced by TreePPL.
-#' @param wide Logical. If \code{TRUE} (default), return the data frame in wide format,
-#' with one column per parameter. If \code{FALSE}, return the data frame in long format,
-#' with parameter names and values stored in \code{parameter}
-#' and \code{sample} columns.
-#'
-#' @return A tibble with one row per particle, containing:
-#'   \describe{
-#'     \item{sweep}{Sweep index.}
-#'     \item{parameter}{Parameter name, if present in the input JSON.}
-#'     \item{sample}{Sampled value.}
-#'     \item{log_weight}{Log weight of the particle.}
-#'     \item{norm_constant}{Log normalizing constant for the sweep.}
-#'     \item{norm_weight}{Normalized weight, rescaled so the maximum
-#'       total log weight across all particles is 1.}
-#'   }
-#'
-#' @examples
-#' \dontrun{
-#' # fit a CRBD model
-#' run_smc <- tp_run(
-#'   data = tp_data(data_input = "crbd"),
-#'   sampler = tp_compile(
-#'     model = "crbd",
-#'     method = "smc-apf"
-#'   ),
-#'   sweeps = 2,
-#'   particles = 10
-#' )
-#'
-#' # get the path to the output JSON file:
-#' out_file <- list.files(
-#'   path = tp_tempdir(),
-#'   pattern = "out",
-#'   full.names = TRUE
-#' )
-#'
-#' # parse JSON to a tidy data frame
-#' tp_parse_smc(json_path = out_file)
-#' }
-#'
-#' @export
-tp_parse_smc <- function(json_path, wide = TRUE) {
-  # read in the JSON file(s)
-  treeppl_out <- readr::read_lines(json_path)
-  treeppl_out <- lapply(treeppl_out, jsonlite::fromJSON, simplifyVector = FALSE)
-
-  # parse sweeps
-  parse_sweep <- function(sweep, sweep_id) {
-    # remove sweeps with nan norm const
-    if (identical(sweep$normConst, "nan")) {
-      message("Removing sweep without normalizing constant (sweep ", sweep_id, ")")
-      return(NULL)
-    }
-
-    # sanity check to detect mismatches in the number of samples & weights
-    if (length(sweep$samples) != length(sweep$weights)) {
-      stop(
-        "Sweep ", sweep_id, ": samples (n=", length(sweep$samples),
-        ") and weights (n=", length(sweep$weights), ") have different lengths."
-      )
-    }
-
-    norm_const <- sweep$normConst
-
-    # convert weight lists to numeric vectors, considering that some weights in the list
-    # may not be numeric, e.g., {"__float__": "-inf"}
-    log_weights <- purrr::map_dbl(sweep$weights, function(w) {
-      if (is.list(w) && !is.null(w[["__float__"]])) {
-        # use R convention for "nan" and "inf" (i.e., NaN, Inf, -Inf)
-        val <- tolower(as.character(w[["__float__"]]))
-        dplyr::case_when(
-          val == "-inf" ~ -Inf,
-          val == "inf" ~ Inf,
-          val == "nan" ~ NaN,
-          TRUE ~ as.numeric(val)
-        )
-      } else {
-        as.numeric(w)
-      }
-    })
-
-    samples <- sweep$samples
-
-    has_parameter_names <- is.list(samples[[1]]) && !is.null(samples[[1]][["__data__"]])
-
-    # if the json has parameter names
-    if (has_parameter_names) {
-      samples_df <- purrr::imap_dfr(samples, function(s, particle_id) {
-        param_values <- s[["__data__"]]
-        tibble::tibble(
-          particle = particle_id,
-          parameter = names(param_values),
-          sample = as.numeric(unlist(param_values))
-        )
-      })
-    } else {
-      samples_df <- purrr::imap_dfr(samples, function(s, particle_id) {
-        values <- as.numeric(unlist(s))
-        tibble::tibble(
-          particle = particle_id,
-          parameter = paste0("x", seq_along(values)),
-          sample = values
-        )
-      })
-    }
-
-    # here we create indexes for the particles so that we can use them to
-    # match weights with samples using left_join()
-    weights_df <- tibble::tibble(
-      particle = seq_along(log_weights),
-      log_weight = log_weights
-    )
-
-    # left_join() ensures the correct alignment of samples with their weights
-    samples_df |>
-      dplyr::left_join(weights_df, by = "particle") |>
-      dplyr::mutate(
-        sweep = sweep_id,
-        norm_constant = norm_const
-      ) |>
-      dplyr::select(-"particle")
-  }
-
-  # parse sweeps one at time and rbind the results
-  result_df <- purrr::imap_dfr(treeppl_out, parse_sweep)
-
-  if (nrow(result_df) == 0) {
-    stop("All sweeps failed")
-  }
-
-  # calculate the normalized weight and return
-  result_df <- result_df |>
-    dplyr::filter(!is.infinite(.data$log_weight)) |>
-    dplyr::mutate(
-      total_lweight = .data$log_weight + .data$norm_constant,
-      norm_weight = exp(.data$total_lweight - max(.data$total_lweight))
-    ) |>
-    dplyr::select(-"total_lweight") |>
-    dplyr::relocate("sweep")
-
-  if (!wide) {
-    return(result_df)
-  }
-  result_df |>
-    dplyr::group_by(.data$sweep, .data$parameter) |>
-    dplyr::mutate(particle = dplyr::row_number()) |>
-    dplyr::ungroup() |>
-    tidyr::pivot_wider(
-      id_cols = c("sweep", "particle", "log_weight", "norm_constant", "norm_weight"),
-      names_from = "parameter",
-      values_from = "sample"
-    )
-}
+# Exported Functions ----------------------------------------------------------------
 
 #' Parse the output of a TreePPL SMC run
 #'
@@ -292,6 +133,129 @@ tp_parse_smc <- function(json_path, wide = TRUE) {
   }
   df
 }
+
+#' Parse the output of a TreePPL MCMC run
+#'
+#' @description
+#' `tp_parse_mcmc()` reads the JSON output of a TreePPL run with a Markov chain
+#' Monte Carlo method (e.g. `"mcmc"`, `"mcmc-naive"`) and returns the samples
+#' as a tidy data frame (tibble), with one row per iteration.
+#'
+#' @details
+#' Both TreePPL output formats are read, and the format is detected
+#' automatically:
+#' * by default, the file holds one line with all samples
+#'   (`{"samples": [...], "weights": [...], "normConst": ...}`);
+#' * with incremental printing (`incremental_printing = TRUE` in
+#'   [tp_sampler()]), each sample is on its own line, followed by an empty
+#'   summary line, which is ignored.
+#'
+#' TreePPL writes NaN and infinite values as `{"__float__": "nan"}`; these are
+#' read as R's `NaN`, `Inf` and `-Inf`. MCMC weights are all equal, so they
+#' are not returned.
+#'
+#' Parameters are named after the fields of the model's return type when the
+#' output has them (e.g. `lambda`, `mu`), and `x1`, `x2`, ... otherwise.
+#' Non-scalar values (vectors, trees) are kept as list-columns.
+#'
+#' Files without samples are skipped with a warning. If no file has samples,
+#' the function stops with an error.
+#'
+#' @param json_path Path(s) to one or more JSON output files, as returned by
+#'   [tp_run()]. Each file is one run.
+#' @param wide Logical. If `TRUE` (default), one row per iteration and one
+#'   column per parameter. If `FALSE`, one row per iteration and parameter,
+#'   with columns `parameter` and `sample`.
+#'
+#' @return A tibble (tidy data frame) with columns:
+#'   * `run`: run number, in the order of `json_path`.
+#'   * `iteration`: iteration number within its run.
+#'   * one column per parameter (`wide = TRUE`), or `parameter` and `sample`
+#'     (`wide = FALSE`).
+#'
+#' @seealso [tp_run()], which calls this function for MCMC runs, and
+#'   [tp_parse_smc()] for SMC output.
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' sampler <- tp_sampler(model = "crbd", method = "mcmc")
+#' run <- tp_run(sampler, data, iterations = 1000, n_runs = 2)
+#'
+#' # Parse output files directly
+#' samples <- tp_parse_mcmc(c("out1.json", "out2.json"))
+#' samples_long <- tp_parse_mcmc("out1.json", wide = FALSE)
+#'
+#' # Incremental printing gives the same result
+#' sampler <- tp_sampler(model = "crbd", method = "mcmc", incremental_printing = TRUE)
+#' run <- tp_run(sampler, data, iterations = 1000)
+#' }
+tp_parse_mcmc <- function(json_path, wide = TRUE) {
+  runs <- lapply(seq_along(json_path), function(run_id) {
+    lines <- readLines(json_path[run_id], warn = FALSE)
+    lines <- lines[nzchar(trimws(lines))]
+
+    # TreePPL writes NaN/Inf as {"__float__": "nan"}; turn them into strings
+    # that as.numeric() understands, so samples simplify to plain vectors
+    lines <- gsub(
+      '\\{\\s*"__float__"\\s*:\\s*"([^"]*)"\\s*\\}', '"\\1"', lines, perl = TRUE
+    )
+
+    # Two output formats:
+    # * default: one summary line {"samples": [...], "weights": ..., ...}
+    # * --incremental-printing: one sample per line, then an (empty) summary
+    is_summary <- grepl('^\\s*\\{\\s*"samples"\\s*:', lines)
+    sample_lines <- lines[!is_summary]
+
+    samples <- if (length(sample_lines) > 0) {
+      # Parse all sample lines in one call by wrapping them in a JSON array
+      jsonlite::fromJSON(
+        paste0("[", paste(sample_lines, collapse = ","), "]"),
+        simplifyVector = TRUE
+      )
+    } else if (any(is_summary)) {
+      jsonlite::fromJSON(lines[which(is_summary)[1]], simplifyVector = TRUE)$samples
+    }
+
+    if (length(samples) == 0) {
+      cli::cli_warn("No samples found in {.file {json_path[run_id]}}; skipping it.")
+      return(NULL)
+    }
+
+    if (is.data.frame(samples)) {
+      samples <- samples[["__data__"]] # named parameters
+    } else {
+      samples <- as.data.frame(matrix(
+        suppressWarnings(as.numeric(samples)),
+        nrow = NROW(samples)
+      ))
+      names(samples) <- paste0("x", seq_along(samples))
+    }
+
+    data.frame(run = run_id, iteration = seq_len(nrow(samples)), samples)
+  })
+
+  runs <- runs[!vapply(runs, is.null, logical(1))]
+  if (length(runs) == 0) {
+    cli::cli_abort("No run returned any samples.")
+  }
+
+  df <- tibble::as_tibble(do.call(rbind, runs))
+
+  if (!wide) {
+    params <- setdiff(names(df), c("run", "iteration"))
+    return(tidyr::pivot_longer(
+      df, tidyr::all_of(params),
+      names_to = "parameter", values_to = "sample"
+    ))
+  }
+  df
+}
+
+
+
+
 
 #' Parse TreePPL json output for host repertoire model
 #'

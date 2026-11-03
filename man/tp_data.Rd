@@ -48,7 +48,7 @@ the order does not matter. Use \code{\link[=tp_expected_input]{tp_expected_input
 the R object each argument expects.
 
 Trees must be given as \code{tpPhylo} objects, built from a \code{phylo} tree with
-\code{\link[=tp_phylo_to_tppl]{tp_phylo_to_tppl()}}. A \code{phylo} object in \code{data} is not converted
+\code{\link[=tp_phylo_to_tpPhylo]{tp_phylo_to_tpPhylo()}}. A \code{phylo} object in \code{data} is not converted
 automatically and stops \code{tp_data()} with an error.
 
 The file is written with the settings TreePPL needs: values of length 1
@@ -62,7 +62,7 @@ phy <- ape::read.tree(text = "((A:4,B:4):6,(C:7,D:7):3);")
 # Diversification model: a tree and the sampling fraction
 d <- tp_data(
   model = "crbd",
-  data = list(tree = tp_phylo_to_tppl(phy), rho = 0.5)
+  data = list(tree = tp_phylo_to_tpPhylo(phy), rho = 0.5)
 )
 d            # prints the summary again
 d$data_path  # path to the JSON file
@@ -70,7 +70,7 @@ d$data_path  # path to the JSON file
 # Write to a chosen file, without the check or the summary
 d <- tp_data(
   model = "crbd",
-  data = list(tree = tp_phylo_to_tppl(phy), rho = 0.5),
+  data = list(tree = tp_phylo_to_tpPhylo(phy), rho = 0.5),
   filename = "crbd_input.json",
   check = FALSE,
   print = FALSE
@@ -79,6 +79,6 @@ d <- tp_data(
 }
 \seealso{
 \code{\link[=tp_expected_input]{tp_expected_input()}} for the arguments a model expects,
-\code{\link[=tp_phylo_to_tppl]{tp_phylo_to_tppl()}} to build trees, \code{\link[=tp_run]{tp_run()}} to run a sampler on the
+\code{\link[=tp_phylo_to_tpPhylo]{tp_phylo_to_tpPhylo()}} to build trees, \code{\link[=tp_run]{tp_run()}} to run a sampler on the
 file.
 }

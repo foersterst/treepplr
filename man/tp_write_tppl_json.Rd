@@ -29,7 +29,7 @@ wrapped in \code{\link[=I]{I()}}.
 \dontrun{
 phy <- ape::read.tree(text = "((A:4,B:4):6,(C:7,D:7):3);")
 tp_write_tppl_json(
-  x = list(tree = tp_phylo_to_tppl(phy), rho = 0.5),
+  x = list(tree = tp_phylo_to_tpPhylo(phy), rho = 0.5),
   file = "testdata_crbd.json"
 )
 }

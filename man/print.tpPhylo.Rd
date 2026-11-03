@@ -15,7 +15,7 @@
 \code{x}, invisibly.
 }
 \description{
-Console method for objects returned by \code{\link[=tp_phylo_to_tppl]{tp_phylo_to_tppl()}}. Like ape's
+Console method for objects returned by \code{\link[=tp_phylo_to_tpPhylo]{tp_phylo_to_tpPhylo()}}. Like ape's
 \code{print.phylo()}, it gives the number of tips and internal nodes and the
 root age.
 }

@@ -13,7 +13,7 @@
 #' the R object each argument expects.
 #'
 #' Trees must be given as `tpPhylo` objects, built from a `phylo` tree with
-#' [tp_phylo_to_tppl()]. A `phylo` object in `data` is not converted
+#' [tp_phylo_to_tpPhylo()]. A `phylo` object in `data` is not converted
 #' automatically and stops `tp_data()` with an error.
 #'
 #' The file is written with the settings TreePPL needs: values of length 1
@@ -44,7 +44,7 @@
 #'   [print.tpData()]).
 #'
 #' @seealso [tp_expected_input()] for the arguments a model expects,
-#'   [tp_phylo_to_tppl()] to build trees, [tp_run()] to run a sampler on the
+#'   [tp_phylo_to_tpPhylo()] to build trees, [tp_run()] to run a sampler on the
 #'   file.
 #'
 #' @export
@@ -56,7 +56,7 @@
 #' # Diversification model: a tree and the sampling fraction
 #' d <- tp_data(
 #'   model = "crbd",
-#'   data = list(tree = tp_phylo_to_tppl(phy), rho = 0.5)
+#'   data = list(tree = tp_phylo_to_tpPhylo(phy), rho = 0.5)
 #' )
 #' d            # prints the summary again
 #' d$data_path  # path to the JSON file
@@ -64,7 +64,7 @@
 #' # Write to a chosen file, without the check or the summary
 #' d <- tp_data(
 #'   model = "crbd",
-#'   data = list(tree = tp_phylo_to_tppl(phy), rho = 0.5),
+#'   data = list(tree = tp_phylo_to_tpPhylo(phy), rho = 0.5),
 #'   filename = "crbd_input.json",
 #'   check = FALSE,
 #'   print = FALSE
@@ -83,7 +83,7 @@ tp_data <- function(model, data, filename = NULL, check = TRUE, print = TRUE) {
     cli::cli_abort(c(
       "{.arg data} can't contain a {.cls phylo} object.",
       "x" = "{cli::qty(phylo_args)}Element{?s} {.val {phylo_args}} {?is a/are} {.cls phylo}.",
-      "i" = "Convert it with {.fn tp_phylo_to_tppl} first."
+      "i" = "Convert it with {.fn tp_phylo_to_tpPhylo} first."
     ))
   }
 
@@ -240,7 +240,7 @@ tp_expected_input <- function(tppl) {
 #' \dontrun{
 #' phy <- ape::read.tree(text = "((A:4,B:4):6,(C:7,D:7):3);")
 #' tp_write_tppl_json(
-#'   x = list(tree = tp_phylo_to_tppl(phy), rho = 0.5),
+#'   x = list(tree = tp_phylo_to_tpPhylo(phy), rho = 0.5),
 #'   file = "testdata_crbd.json"
 #' )
 #' }
@@ -303,16 +303,16 @@ tp_write_tppl_json <- function(x, file) {
 #' phy <- ape::read.tree(text = "((A:4,B:4):6,(C:7,D:7):3);")
 #'
 #' # ClockTree (diversification models)
-#' tree <- tp_phylo_to_tppl(phy)
+#' tree <- tp_phylo_to_tpPhylo(phy)
 #' tree
 #'
 #' # TreeLabeled (host-repertoire models): a label on every leaf and node
-#' tree_labeled <- tp_phylo_to_tppl(
+#' tree_labeled <- tp_phylo_to_tpPhylo(
 #'   phy,
 #'   leaf_extra = function(i) list(label = i),
 #'   node_extra = function(i) list(label = i)
 #' )
-tp_phylo_to_tppl <- function(
+tp_phylo_to_tpPhylo <- function(
   phy,
   leaf_ctor = "Leaf",
   node_ctor = "Node",
@@ -733,7 +733,7 @@ tp_input_check <- function(json, tppl) {
   }
 
   # Any TreePPL tree type: the user supplies a tree built with
-  # tp_phylo_to_tppl() (class "tpPhylo")
+  # tp_phylo_to_tpPhylo() (class "tpPhylo")
   known_trees <- c(
     "Tree",
     "ClockTree",
@@ -944,7 +944,7 @@ print.tpData <- function(x, ...) {
 
 #' Print a TreePPL tree
 #'
-#' Console method for objects returned by [tp_phylo_to_tppl()]. Like ape's
+#' Console method for objects returned by [tp_phylo_to_tpPhylo()]. Like ape's
 #' `print.phylo()`, it gives the number of tips and internal nodes and the
 #' root age.
 #'

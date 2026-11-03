@@ -850,7 +850,7 @@ tp_input_check <- function(json, tppl) {
 #' @export
 print.tpEdata <- function(x, ...) {
   cli::cli_h2("Expected Input")
-  cli::cli_text("Model file: {.val {x$model_file}}")
+  cli::cli_text("Model file: {.path {x$model_file}}")
   cli::cli_text("Model name: {x$model_name}")
 
   if (length(x$expect_args) == 0) {
@@ -885,7 +885,7 @@ print.tpEdata <- function(x, ...) {
 #' @export
 print.tpIcheck <- function(x, ...) {
   cli::cli_h2("Input Check")
-  cli::cli_text("JSON file: {.val {x$json_file}}")
+  cli::cli_text("JSON file: {.path {x$json_file}}")
   cli::cli_text("Model name: {x$model_name}")
 
   n_args <- length(x$expect_args)
@@ -925,7 +925,7 @@ print.tpIcheck <- function(x, ...) {
 #' @export
 print.tpData <- function(x, ...) {
   cli::cli_h2("Data Input")
-  cli::cli_text("Data file: {.val {x$data_path}}")
+  cli::cli_text("Data file: {.path {x$data_path}}")
   cli::cli_text("Model: {.val {x$model_name}}")
 
   if (length(x$expect_args) == 0) {

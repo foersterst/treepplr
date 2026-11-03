@@ -257,8 +257,9 @@ tp_run <- function(
   }
 
   cli::cli_inform(c(
-    "No parser is available yet for this model with method {.val {method}}.",
-    "i" = "The {cli::qty(length(files))}output file{?s} can be found in {.path {dir}}."
+    "No parser is available yet for this model.",
+    "i" = "The {cli::qty(length(files))}output file{?s} can be found in: {dir}.",
+    "i" = "Click {.run [here](treepplr::tp_open_dir(\"{dir}\"))} to open the directory."
   ))
   files
 }

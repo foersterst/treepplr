@@ -4,7 +4,7 @@
 \alias{tp_sampler}
 \title{Build a TreePPL sampler for a given model and inference method}
 \usage{
-tp_sampler(model, method = "mcmc", ...)
+tp_sampler(model, method = "mcmc", print = TRUE, ...)
 }
 \arguments{
 \item{model}{One of three options:
@@ -20,6 +20,8 @@ model, and otherwise the string is treated as code.}
 
 \item{method}{Inference method to compile the model with. See
 \code{tp_treeppl_options("methods")} for all supported methods.}
+
+\item{print}{Whether to print information about the sampler when it is created.}
 
 \item{...}{Compile options, as \code{name = value} pairs or a single list (see
 \code{\link[=tp_list]{tp_list()}}). See \code{tp_treeppl_options("compile")} for all supported

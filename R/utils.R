@@ -410,6 +410,16 @@ tp_list <- function(...) {
   invisible(result)
 }
 
+#' Open a directory in the system's file browser
+#'
+#' @param dir Path to a directory. Defaults to [tp_tempdir()].
+#' @return `dir`, invisibly.
+#' @export
+tp_open_dir <- function(dir = tp_tempdir()) {
+  utils::browseURL(normalizePath(dir))
+  invisible(dir)
+}
+
 
 # Printing Methods ----------------------------------------------------------------
 

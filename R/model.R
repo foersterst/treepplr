@@ -97,6 +97,7 @@ tp_write_model <- function(model, model_file_name = "tmp_model_file") {
 #'   model, and otherwise the string is treated as code.
 #' @param method Inference method to compile the model with. See
 #'   `tp_treeppl_options("methods")` for all supported methods.
+#' @param print Whether to print information about the sampler when it is created.
 #' @param ... Compile options, as `name = value` pairs or a single list (see
 #'   [tp_list()]). See `tp_treeppl_options("compile")` for all supported
 #'   options. Names are written without `--`, and underscores are converted to
@@ -128,7 +129,7 @@ tp_write_model <- function(model, model_file_name = "tmp_model_file") {
 #' # Your own model file, default method (MCMC)
 #' sampler <- tp_sampler(model = "path/to/my_model.tppl")
 #' }
-tp_sampler <- function(model, method = "mcmc", ...) {
+tp_sampler <- function(model, method = "mcmc", print = TRUE, ...) {
   if (!is.character(model) || length(model) != 1) {
     cli::cli_abort(
       "{.arg model} must be a single string: a file path, model name or code."
@@ -170,7 +171,7 @@ tp_sampler <- function(model, method = "mcmc", ...) {
     class = "tpSampler"
   )
 
-  print(out)
+  if (print) print(out)
   invisible(out)
 }
 
@@ -423,10 +424,8 @@ tp_sampler <- function(model, method = "mcmc", ...) {
 #'
 #' @export
 print.tpSampler <- function(x, ...) {
-  cli::cli_h2("{cli::symbol$tick} TreePPL Sampler")
-  cli::cli_text("Executable: {.path {x$exe_path}}")
+  cli::cli_h2("TreePPL Sampler")
   cli::cli_text("Model file: {.path {x$model_path}}")
-  cli::cli_text("Method: {.val {x$method}}")
 
   if (length(x$compile_opt) > 0) {
     opts <- paste0(
@@ -437,7 +436,7 @@ print.tpSampler <- function(x, ...) {
         character(1)
       )
     )
-    cli::cli_text("Compile options: {.code {opts}}")
+    cli::cli_text("Compile options: {opts}")
   }
 
   invisible(x)

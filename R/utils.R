@@ -420,6 +420,53 @@ tp_open_dir <- function(dir = tp_tempdir()) {
   invisible(dir)
 }
 
+#' Open a file in the editor
+#'
+#' @description
+#' `tp_open_tppl()` opens a `.tppl` model file, so it can be checked and edited.
+#' In RStudio or Positron it opens in an editor tab; elsewhere it opens in the
+#' editor R is configured to use.
+#'
+#' @param path Path to the `.tppl` file, or just the model name if the model file
+#' is already in TreePPL's model library. Use [`tp_model_library()`] to check
+#' the models in TreePPL's model library (see Examples).
+#'
+#' @return `path`, invisibly.
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' # Check models available in TreePPL's model library:
+#' tp_model_library()
+#'
+#' tp_open_tppl("clads2")
+#'
+#' # Or use the path to a tppl file:
+#' tp_open_tppl("fake_path_to/crbd.tppl")
+#' }
+tp_open_tppl <- function(path) {
+  if (!is.character(path) || length(path) != 1 || is.na(path)) {
+    cli::cli_abort("{.arg path} must be a single file path or a single model name.")
+  }
+
+  # If the model is in the model library
+  mod_lib <- .find(type = "model", model_name = path)
+
+  if (length(mod_lib) > 0) {
+    utils::file.edit(mod_lib)
+    return(invisible(mod_lib))
+
+    # if it isn't in the model library, use the path
+  } else {
+    if (!file.exists(path)) {
+      cli::cli_abort("Can't find the file {.file {path}}.")
+    }
+    utils::file.edit(path)
+    return(invisible(path))
+  }
+}
+
 
 # Printing Methods ----------------------------------------------------------------
 

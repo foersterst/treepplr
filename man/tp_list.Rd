@@ -16,7 +16,7 @@ A named list of options.
 \description{
 \code{tp_list()} collects options given either as separate \code{name = value}
 arguments or as a single list, and returns them as one named list. It is
-how \code{\link[=tp_compile]{tp_compile()}} and \code{\link[=tp_run]{tp_run()}} read their \code{...}, so both functions accept
+how \code{\link[=tp_sampler]{tp_sampler()}} and \code{\link[=tp_run]{tp_run()}} read their \code{...}, so both functions accept
 either form. Use it directly to build a set of options once and reuse it.
 }
 \details{
@@ -44,7 +44,7 @@ identical(tp_list(opts), tp_list(particles = 1000, subsample = TRUE, subsample_s
 \dontrun{
 # reuse the same runtime options for several runs
 run_opts <- tp_list(particles = 1000, sweeps = 2)
-sampler <- tp_compile(model = "crbd", method = "smc-bpf")
+sampler <- tp_sampler(model = "crbd", method = "smc-bpf")
 data_path <- tp_data(data_input = "crbd")
 result_1 <- tp_run(sampler, data_path, run_opts)
 

@@ -16,7 +16,7 @@ tp_run(
 )
 }
 \arguments{
-\item{sampler}{A TreePPL sampler (class \code{tppls}), produced by \code{\link[=tp_compile]{tp_compile()}}.}
+\item{sampler}{A TreePPL sampler (class \code{tppls}), produced by \code{\link[=tp_sampler]{tp_sampler()}}.}
 
 \item{data}{Path to the input data, produced by \code{\link[=tp_data]{tp_data()}}.}
 
@@ -37,7 +37,7 @@ capped at \code{n_runs}.}
 \code{\link[=tp_list]{tp_list()}}). See \code{tp_treeppl_options("runtime")} for all supported
 arguments. Names are written without \verb{--}, and underscores are converted to
 hyphens (e.g., \code{subsample_size = 10} becomes \verb{--subsample-size 10}).
-Compile options are not allowed here; pass them to \code{\link[=tp_compile]{tp_compile()}} instead.}
+Compile options are not allowed here; pass them to \code{\link[=tp_sampler]{tp_sampler()}} instead.}
 }
 \value{
 If a parser is available, a workable R object (usually a tidy data frame,
@@ -60,12 +60,12 @@ the output directory and the paths of the raw output files are returned.
 \examples{
 \dontrun{
 # SMC
-sampler <- tp_compile(model = "coin", method = "smc-bpf")
+sampler <- tp_sampler(model = "coin", method = "smc-bpf")
 data_path <- tp_data(data_input = "coin")
 result <- tp_run(sampler, data_path, particles = 2000, n_runs = 2)
 
 # MCMC, with runtime options given as a list
-sampler <- tp_compile(model = "coin", method = "mcmc-naive")
+sampler <- tp_sampler(model = "coin", method = "mcmc-naive")
 result <- tp_run(sampler, data_path, tp_list(iterations = 2000))
 }
 }

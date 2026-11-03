@@ -21,12 +21,12 @@ methods, \code{argument} is the method name (e.g., \code{"mcmc"}) and \code{valu
 \description{
 \code{tp_treeppl_options()} reads the inference methods and options supported by
 the TreePPL compiler (\code{tpplc --help}) and displays them in the console.
-Inference methods are passed to the \code{method} argument of \code{\link[=tp_compile]{tp_compile()}},
-compile options to the \code{...} of \code{\link[=tp_compile]{tp_compile()}}, and runtime options to the
+Inference methods are passed to the \code{method} argument of \code{\link[=tp_sampler]{tp_sampler()}},
+compile options to the \code{...} of \code{\link[=tp_sampler]{tp_sampler()}}, and runtime options to the
 \code{...} of \code{\link[=tp_run]{tp_run()}}.
 }
 \details{
-Options are shown in the form accepted by \code{\link[=tp_compile]{tp_compile()}} and \code{\link[=tp_run]{tp_run()}},
+Options are shown in the form accepted by \code{\link[=tp_sampler]{tp_sampler()}} and \code{\link[=tp_run]{tp_run()}},
 with the type of value they expect. The type is translated from the
 placeholder used in \code{tpplc --help}:
 \itemize{

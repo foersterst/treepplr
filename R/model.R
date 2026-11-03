@@ -5,12 +5,12 @@
 #' @description
 #' `tp_treeppl_options()` reads the inference methods and options supported by
 #' the TreePPL compiler (`tpplc --help`) and displays them in the console.
-#' Inference methods are passed to the `method` argument of [tp_compile()],
-#' compile options to the `...` of [tp_compile()], and runtime options to the
+#' Inference methods are passed to the `method` argument of [tp_sampler()],
+#' compile options to the `...` of [tp_sampler()], and runtime options to the
 #' `...` of [tp_run()].
 #'
 #' @details
-#' Options are shown in the form accepted by [tp_compile()] and [tp_run()],
+#' Options are shown in the form accepted by [tp_sampler()] and [tp_run()],
 #' with the type of value they expect. The type is translated from the
 #' placeholder used in `tpplc --help`:
 #' * `INT` or `N`: `<integer>`, e.g. `--subsample-size INT` is shown as
@@ -194,7 +194,7 @@ tp_sampler <- function(model, method = "mcmc", print = TRUE, ...) {
 #'
 #' @description
 #' `.value_type()` translates the placeholders that `tpplc --help` uses for
-#' option values to the R type expected by [tp_compile()] and [tp_run()]:
+#' option values to the R type expected by [tp_sampler()] and [tp_run()]:
 #' `INT` and `N` to `"integer"`, `FLOAT` to `"number"`, no placeholder (a flag
 #' without a value) to `"logical"`, and any other placeholder (`ARG`, `FILE`,
 #' `<option>`, ...) to `"string"`.

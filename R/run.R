@@ -7,13 +7,13 @@
 #' raw JSON output to disk, prints a run summary and, when a parser is available
 #' for the model/method combination, imports the output to the current R session.
 #'
-#' @param sampler A TreePPL sampler (class `tppls`), produced by [tp_compile()].
+#' @param sampler A TreePPL sampler (class `tppls`), produced by [tp_sampler()].
 #' @param data Path to the input data, produced by [tp_data()].
 #' @param ... Runtime options, as `name = value` pairs or a single list (see
 #'   [tp_list()]). See `tp_treeppl_options("runtime")` for all supported
 #'   arguments. Names are written without `--`, and underscores are converted to
 #'   hyphens (e.g., `subsample_size = 10` becomes `--subsample-size 10`).
-#'   Compile options are not allowed here; pass them to [tp_compile()] instead.
+#'   Compile options are not allowed here; pass them to [tp_sampler()] instead.
 #' @param dir Path to the directory where the output is saved. If `NULL`, uses
 #'   [tp_tempdir()].
 #' @param out_file_name Name of the output file, without extension. With more
@@ -40,12 +40,12 @@
 #' @examples
 #' \dontrun{
 #' # SMC
-#' sampler <- tp_compile(model = "coin", method = "smc-bpf")
+#' sampler <- tp_sampler(model = "coin", method = "smc-bpf")
 #' data_path <- tp_data(data_input = "coin")
 #' result <- tp_run(sampler, data_path, particles = 2000, n_runs = 2)
 #'
 #' # MCMC, with runtime options given as a list
-#' sampler <- tp_compile(model = "coin", method = "mcmc-naive")
+#' sampler <- tp_sampler(model = "coin", method = "mcmc-naive")
 #' result <- tp_run(sampler, data_path, tp_list(iterations = 2000))
 #' }
 tp_run <- function(
@@ -76,7 +76,7 @@ tp_run <- function(
   if (length(opts$compile) > 0) {
     cli::cli_abort(c(
       "Compile options can't be given to {.fn tp_run}: {.arg {names(opts$compile)}}.",
-      "i" = "Pass them to {.fn tp_compile} instead."
+      "i" = "Pass them to {.fn tp_sampler} instead."
     ))
   }
 
@@ -203,29 +203,6 @@ tp_run <- function(
   invisible(status)
 }
 
-#' Print the summary of a TreePPL run
-#'
-#' @param model The model used to compile the sampler.
-#' @param method The inference method.
-#' @param dir Path to the output directory.
-#' @param files Names of the output files.
-#' @param elapsed A `difftime` with the elapsed time.
-#'
-#' @return `NULL`, invisibly. Called for its side effect of printing to the
-#'   console.
-#' @noRd
-.print_run_summary <- function(model, method, dir, files, elapsed) {
-  cli::cli_h2("Analysis Summary")
-  cli::cli_alert_success("Completed")
-  cli::cli_dl(c(
-    "Elapsed time" = format(round(elapsed, digits = 2)),
-    "Model" = "{model}",
-    "Method" = "{method}",
-    "Output directory" = "{.path {dir}}",
-    "Output file(s)" = "{.file {files}}"
-  ))
-}
-
 #' Parse the output of a TreePPL run
 #'
 #' @description
@@ -263,3 +240,30 @@ tp_run <- function(
   ))
   files
 }
+
+# Printing Methods ------------------------------------------------------------------
+
+#' Print the summary of a TreePPL run
+#'
+#' @param model The model used to compile the sampler.
+#' @param method The inference method.
+#' @param dir Path to the output directory.
+#' @param files Names of the output files.
+#' @param elapsed A `difftime` with the elapsed time.
+#'
+#' @return `NULL`, invisibly. Called for its side effect of printing to the
+#'   console.
+#' @noRd
+.print_run_summary <- function(model, method, dir, files, elapsed) {
+  cli::cli_h2("Analysis Summary")
+  cli::cli_alert_success("Completed")
+  cli::cli_dl(c(
+    "Elapsed time" = format(round(elapsed, digits = 2)),
+    "Model" = "{model}",
+    "Method" = "{method}",
+    "Output directory" = "{.val {dir}}",
+    "Output file(s)" = "{.val {files}}"
+  ))
+}
+
+

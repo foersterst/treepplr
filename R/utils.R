@@ -108,7 +108,7 @@ tp_model_library <- function() {
 #' @description
 #' `tp_list()` collects options given either as separate `name = value`
 #' arguments or as a single list, and returns them as one named list. It is
-#' how [tp_compile()] and [tp_run()] read their `...`, so both functions accept
+#' how [tp_sampler()] and [tp_run()] read their `...`, so both functions accept
 #' either form. Use it directly to build a set of options once and reuse it.
 #'
 #' @param ... Either separate arguments (`name = value`), or a single list of
@@ -140,7 +140,7 @@ tp_model_library <- function() {
 #' \dontrun{
 #' # reuse the same runtime options for several runs
 #' run_opts <- tp_list(particles = 1000, sweeps = 2)
-#' sampler <- tp_compile(model = "crbd", method = "smc-bpf")
+#' sampler <- tp_sampler(model = "crbd", method = "smc-bpf")
 #' data_path <- tp_data(data_input = "crbd")
 #' result_1 <- tp_run(sampler, data_path, run_opts)
 #'
@@ -222,7 +222,7 @@ tp_list <- function(...) {
 #' for. `type = "auto-import"` is normally called without a `model_name`: the
 #' auto-imports are the handful of files that define `ClockTree`, `Matrix` and
 #' the delayed-sampling distributions, which models use without importing them
-#' and which [.model_spec()] therefore has to read alongside the model itself.
+#' and which `.model_spec()` therefore has to read alongside the model itself.
 #'
 #' @param type One of `"model"` (`.tppl` files under `models/`), `"data"`
 #'   (`.json` files under `models/`), or `"auto-import"` (`.tppl` files under

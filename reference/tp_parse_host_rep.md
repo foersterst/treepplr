@@ -18,5 +18,5 @@ tp_parse_host_rep(treeppl_out)
 
 ## Value
 
-A list (n = n_runs) of data frames with the output from inference in
+A list (n = sweeps) of data frames with the output from inference in
 TreePPL under the host repertoire evolution model.

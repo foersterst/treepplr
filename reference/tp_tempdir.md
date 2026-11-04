@@ -1,31 +1,25 @@
-# Temporary directory for running treeppl
+# Temporary directory for running TreePPL
 
-`tp_tempdir` returns a normalized path for a temporary directory where
-the executables can read and write temporary files.
+`tp_tempdir()` creates (if needed) and returns a normalized path to a
+temporary directory where the executables can read and write files.
 
 ## Usage
 
 ``` r
-tp_tempdir(temp_dir = NULL, sep = NULL, sub = NULL)
+tp_tempdir(temp_dir = NULL, sub = NULL)
 ```
 
 ## Arguments
 
 - temp_dir:
 
-  NULL, or a path to be used; if NULL, R's
-  [base::tempdir](https://rdrr.io/r/base/tempfile.html) is used.
-
-- sep:
-
-  Better ignored; non-default values are passed to
-  [base::normalizePath](https://rdrr.io/r/base/normalizePath.html).
+  A path to be used, or `NULL` to use R's
+  [`base::tempdir()`](https://rdrr.io/r/base/tempfile.html).
 
 - sub:
 
-  Extension for defining a sub-directory within the directory defined by
-  [base::tempdir](https://rdrr.io/r/base/tempfile.html).
+  Optional name of a sub-directory inside `temp_dir`.
 
 ## Value
 
-Normalized path with system-dependent terminal separator.
+A normalized path ending with the system-dependent file separator.

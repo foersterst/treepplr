@@ -1,6 +1,7 @@
-# Write out a custom model to tp_tempdir()
+# Write a custom model to tp_tempdir()
 
-Write out a custom model to tp_tempdir()
+`tp_write_model()` writes TreePPL code to a `.tppl` file in
+[`tp_tempdir()`](http://treeppl.org/treepplr/reference/tp_tempdir.md).
 
 ## Usage
 
@@ -16,8 +17,8 @@ tp_write_model(model, model_file_name = "tmp_model_file")
 
 - model_file_name:
 
-  An optional name to the file created
+  Name of the file to create, without extension.
 
 ## Value
 
-The path to the file created
+The path to the file created.

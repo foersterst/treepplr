@@ -19,6 +19,7 @@ First load the required R packages:
 library(treepplr)
 library(dplyr)
 library(ggplot2)
+library(readr)
 ```
 
 ## Understanding the coin model
@@ -32,12 +33,12 @@ following functions:
 
 ``` r
 
-model_path <- tp_model("coin")
+sampler <- tp_compile("coin")
 ```
 
 ``` r
 
-readr::read_file(model_path)
+readr::read_file(sampler$model_path)
 ```
 
 The main part of the model is defined in a function called `coinModel`:
@@ -119,20 +120,17 @@ best for different models. Here, we will use sequential Monte Carlo
 (SMC), specifically the bootstrap particle filter version (the
 `method=smc-bpf` option).
 
-The function
-[`tp_compile()`](http://treeppl.org/treepplr/reference/tp_compile.md)
-has many optional arguments that allow you to select among the inference
-methods supported by TreePPL, and setting relevant options for each one
-of them. For an up-to-date description of available inference strategies
-supported, see
-[`tp_compile_options()`](http://treeppl.org/treepplr/reference/tp_compile_options.md).
+The function `tp_compile()` has many optional arguments that allow you
+to select among the inference methods supported by TreePPL, and setting
+relevant options for each one of them. For an up-to-date description of
+available inference strategies supported, see `tp_compile_options()`.
 
 Now let’s compile the model to en executable that also contains the
 necessary machinery to run the chosen inference method.
 
 ``` r
 
-exe_path <- tp_compile(model = "coin", method = "smc-bpf", particles = 1000)
+exe_path <- tp_compile(model = "coin", method = "smc-bpf", particles = 5000)
 ```
 
 ## Data
@@ -179,7 +177,7 @@ Let’s run 10 sweeps (10 SMC runs, if you wish).
 
 ``` r
 
-output_list <- tp_run(compiled_model = exe_path, data = data, n_sweeps = 10)
+output_list <- tp_run(compiled_model = exe_path, data = data, sweeps = 10)
 ```
 
 The run should take a few seconds to complete depending on your machine.
@@ -215,10 +213,9 @@ in log units.
 
 ``` r
 
-output <- tp_parse_smc(output_list)
+output <- tp_parse_smc(output_list) # update this according to new parsers
 
 tp_smc_convergence(output)
-#> [1] 0.000693138
 ```
 
 It seems that our run provides a quite accurate estimate of the
@@ -228,11 +225,10 @@ It is also easy to plot the sampled values.
 
 ``` r
 
+# update this according to new parsers
 ggplot2::ggplot(output, ggplot2::aes(samples, weight = norm_weight)) +
   ggplot2::geom_histogram(ggplot2::aes(y = ggplot2::after_stat(density)),
                  col = "white", fill = "lightblue", binwidth=0.01) +
   ggplot2::geom_density() +
   ggplot2::theme_bw()
 ```
-
-![](coin-example_files/figure-html/unnamed-chunk-10-1.png)

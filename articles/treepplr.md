@@ -73,10 +73,10 @@ necessary machinery to run the chosen inference method.
 ``` r
 
 # Using a model from the library and a Sequential Monte Carlo method
-exe_path <- tp_compile(model = "crbd", method = "smc-apf", particles = 10000)
+sampler <- tp_compile(model = "crbd", method = "smc-apf", particles = 10000)
 
 # Using a custom model and a Markov chain Monte Carlo method
-exe_path <- tp_compile(model = model_path, method = "mcmc-lightweight",
+sampler <- tp_compile(model = model_path, method = "mcmc-lightweight",
                        iterations = 10000)
 ```
 
@@ -88,7 +88,7 @@ runs you want to do.
 
 ``` r
 
-output <- tp_run(compiled_model = exe_path, data = data_path, n_runs = 4)
+output <- tp_run(compiled_model = sampler, data = data_path)
 ```
 
 ## Convergence

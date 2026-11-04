@@ -1,90 +1,98 @@
-# Run a TreePPL program
+# Run a TreePPL sampler
 
-Run TreePPL and return output.
+`tp_run()` executes a compiled TreePPL sampler on the given data, saves
+the raw JSON output to disk, prints a run summary and, when a parser is
+available for the model/method combination, imports the output to the
+current R session.
 
 ## Usage
 
 ``` r
 tp_run(
-  compiled_model,
+  sampler,
   data,
-  n_runs = 1,
-  n_sweeps = 1,
   dir = NULL,
   out_file_name = "out",
+  n_runs = 1,
+  n_processes = 3,
+  verbose = TRUE,
   ...
 )
 ```
 
 ## Arguments
 
-- compiled_model:
+- sampler:
 
-  a [base::character](https://rdrr.io/r/base/character.html) with the
-  full path to the compiled model outputted by
-  [tp_compile](http://treeppl.org/treepplr/reference/tp_compile.md).
+  A TreePPL sampler (class `tppls`), produced by
+  [`tp_sampler()`](http://treeppl.org/treepplr/reference/tp_sampler.md).
 
 - data:
 
-  a [base::character](https://rdrr.io/r/base/character.html) with the
-  full path to the data file in TreePPL JSON format (as outputted by
-  [tp_data](http://treeppl.org/treepplr/reference/tp_data.md)).
-
-- n_runs:
-
-  When using MCMC, a
-  [base::integer](https://rdrr.io/r/base/integer.html) giving the number
-  of runs to be done.
-
-- n_sweeps:
-
-  When using SMC, a [base::integer](https://rdrr.io/r/base/integer.html)
-  giving the number of SMC sweeps to be done.
+  Path to the input data, produced by
+  [`tp_data()`](http://treeppl.org/treepplr/reference/tp_data.md).
 
 - dir:
 
-  a [base::character](https://rdrr.io/r/base/character.html) with the
-  full path to the directory where you want to save the output. Default
-  is [`base::tempdir()`](https://rdrr.io/r/base/tempfile.html).
+  Path to the directory where the output is saved. If `NULL`, uses
+  [`tp_tempdir()`](http://treeppl.org/treepplr/reference/tp_tempdir.md).
 
 - out_file_name:
 
-  a [base::character](https://rdrr.io/r/base/character.html) with the
-  name of the output file in JSON format. Default is "out".
+  Name of the output file, without extension. With more than one run,
+  the run number is appended (e.g., `out1.json`, `out2.json`).
+
+- n_runs:
+
+  Number of independent runs of the sampler.
+
+- n_processes:
+
+  Number of parallel processes used when `n_runs > 1`. It is capped at
+  `n_runs`.
+
+- verbose:
+
+  Logical. Print a run summary on completion?
 
 - ...:
 
-  See
-  [tp_run_options](http://treeppl.org/treepplr/reference/tp_run_options.md)
-  for all supported arguments.
+  Runtime options, as `name = value` pairs or a single list (see
+  [`tp_list()`](http://treeppl.org/treepplr/reference/tp_list.md)). See
+  `tp_treeppl_options("runtime")` for all supported arguments. Names are
+  written without `--`, and underscores are converted to hyphens (e.g.,
+  `subsample_size = 10` becomes `--subsample-size 10`). Compile options
+  are not allowed here; pass them to
+  [`tp_sampler()`](http://treeppl.org/treepplr/reference/tp_sampler.md)
+  instead.
 
 ## Value
 
-A list of TreePPL output in parsed JSON format.
+If a parser is available, a workable R object (usually a tidy data
+frame, a list, or an object of class `phylo`, depending on the model).
+
+## Details
+
+Previous output files with the same `out_file_name` in `dir` are deleted
+before running.
+
+If the model belongs to a category without an available parser (e.g.
+`"host-repertoire-evolution"`, `"tree-inference"`), or if the inference
+method is neither SMC nor MCMC, no parsing is attempted: a message
+points to the output directory and the paths of the raw output files are
+returned.
 
 ## Examples
 
 ``` r
 if (FALSE) { # \dontrun{
-# When using SMC
-# compile model and create SMC inference machinery
-exe_path <- tp_compile(model = "coin", method = "smc-bpf", particles = 2000)
-
-# prepare data
+# SMC
+sampler <- tp_sampler(model = "coin", method = "smc-bpf")
 data_path <- tp_data(data_input = "coin")
+result <- tp_run(sampler, data_path, particles = 2000, n_runs = 2)
 
-# run TreePPL
-result <- tp_run(exe_path, data_path, n_sweeps = 2)
-
-
-# When using MCMC
-# compile model and create MCMC inference machinery
-exe_path <- tp_compile(model = "coin", method = "mcmc-naive", iterations = 2000)
-
-# prepare data
-data_path <- tp_data(data_input = "coin")
-
-# run TreePPL
-result <- tp_run(exe_path, data_path, n_runs = 2)
+# MCMC, with runtime options given as a list
+sampler <- tp_sampler(model = "coin", method = "mcmc-naive")
+result <- tp_run(sampler, data_path, tp_list(iterations = 2000))
 } # }
 ```

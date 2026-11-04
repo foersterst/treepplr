@@ -1,6 +1,6 @@
-# Model names supported by treepplr
+# Models implemented in treepplr
 
-Provides a list of all models in the TreePPL model library.
+`tp_model_library()` lists all models in the TreePPL model library.
 
 ## Usage
 
@@ -10,4 +10,7 @@ tp_model_library()
 
 ## Value
 
-A list of model names.
+A data frame of class `tp_model_library` with columns `category` and
+`model_name`, ordered by category and then by model name. Printing the
+object shows the models grouped by category. It can still be subset like
+a regular data frame, for example `tp_model_library()$model_name`.

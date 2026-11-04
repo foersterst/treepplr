@@ -12,9 +12,8 @@ tp_map_tree(trees_out)
 
 - trees_out:
 
-  The list returned by
-  [tp_json_to_phylo](http://treeppl.org/treepplr/reference/tp_json_to_phylo.md)
-  (containing \$trees and \$weights)
+  The list returned by tp_json_to_phylo (containing \$trees and
+  \$weights)
 
 ## Value
 

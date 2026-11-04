@@ -10,7 +10,7 @@ library(treepplr)
 exe_path <- tp_compile("crbd", "smc-apf", particles = 5000)
 data_path <- tp_data("crbd")
 
-output_list <- tp_run(exe_path, data_path, n_sweeps = 4)
+output_list <- tp_run(exe_path, data_path, sweeps = 4)
 ```
 
 ``` r
@@ -18,5 +18,4 @@ output_list <- tp_run(exe_path, data_path, n_sweeps = 4)
 output <- tp_parse_smc(output_list)
 
 tp_smc_convergence(output)
-#> [1] 0.07591128
 ```

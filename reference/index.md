@@ -1,53 +1,78 @@
 # Package index
 
-## All functions
+## Installation
 
-- [`tp_compile()`](http://treeppl.org/treepplr/reference/tp_compile.md)
-  : Compile a TreePPL model and create inference machinery
-- [`tp_compile_options()`](http://treeppl.org/treepplr/reference/tp_compile_options.md)
-  : Options that can be passed to TreePPL compiler
-- [`tp_data()`](http://treeppl.org/treepplr/reference/tp_data.md) :
-  Import data for TreePPL program
-- [`tp_expected_input()`](http://treeppl.org/treepplr/reference/tp_expected_input.md)
-  : List expected input variables for a model
 - [`tp_installing_treeppl()`](http://treeppl.org/treepplr/reference/tp_installing_treeppl.md)
-  : Platform-dependent treeppl self-contained installation
-- [`tp_json_to_phylo()`](http://treeppl.org/treepplr/reference/tp_json_to_phylo.md)
-  : Convert TreePPL multi-line JSON to R phylo/multiPhylo object with
-  associated weights
-- [`tp_list()`](http://treeppl.org/treepplr/reference/tp_list.md) :
-  Create a flat list
-- [`tp_map_tree()`](http://treeppl.org/treepplr/reference/tp_map_tree.md)
-  : Find the Maximum A Posteriori (MAP) Tree from weighted samples
-- [`tp_mcmc_convergence()`](http://treeppl.org/treepplr/reference/tp_mcmc_convergence.md)
-  : Check for convergence across multiple MCMC runs.
-- [`tp_model()`](http://treeppl.org/treepplr/reference/tp_model.md) :
-  Import a TreePPL model
+  : Platform-dependent TreePPL self-contained installation
+- [`tp_treeppl_options()`](http://treeppl.org/treepplr/reference/tp_treeppl_options.md)
+  : TreePPL compiler options
+
+## Models
+
 - [`tp_model_library()`](http://treeppl.org/treepplr/reference/tp_model_library.md)
-  : Model names supported by treepplr
+  : Models implemented in treepplr
+- [`tp_expected_input()`](http://treeppl.org/treepplr/reference/tp_expected_input.md)
+  : List the input arguments a TreePPL model expects
+- [`tp_write_model()`](http://treeppl.org/treepplr/reference/tp_write_model.md)
+  : Write a custom model to tp_tempdir()
+
+## Preparing input
+
+- [`tp_phylo_to_tpPhylo()`](http://treeppl.org/treepplr/reference/tp_phylo_to_tpPhylo.md)
+  :
+
+  Convert an [`ape::phylo`](https://rdrr.io/pkg/ape/man/read.tree.html)
+  tree into a TreePPL tree
+
+- [`tp_dna_to_int()`](http://treeppl.org/treepplr/reference/tp_dna_to_int.md)
+  : Convert a DNA alignment into a TreePPL integer matrix
+
+- [`tp_matrix_to_tppl()`](http://treeppl.org/treepplr/reference/tp_matrix_to_tppl.md)
+  :
+
+  Convert an R matrix into a TreePPL `Matrix[Real]`
+
+- [`tp_write_tppl_json()`](http://treeppl.org/treepplr/reference/tp_write_tppl_json.md)
+  : Write an R list to a TreePPL JSON input file
+
+- [`tp_data()`](http://treeppl.org/treepplr/reference/tp_data.md) :
+  Write the JSON input file for a TreePPL model
+
+- [`tp_input_check()`](http://treeppl.org/treepplr/reference/tp_input_check.md)
+  : Check a JSON input file against a TreePPL model
+
+## Running TreePPL
+
+- [`tp_sampler()`](http://treeppl.org/treepplr/reference/tp_sampler.md)
+  : Build a TreePPL sampler for a given model and inference method
+- [`tp_run()`](http://treeppl.org/treepplr/reference/tp_run.md) : Run a
+  TreePPL sampler
+- [`tp_list()`](http://treeppl.org/treepplr/reference/tp_list.md) :
+  Collect TreePPL options in a list
+
+## Reading output
+
+- [`tp_parse_smc()`](http://treeppl.org/treepplr/reference/tp_parse_smc.md)
+  : Parse the output of a TreePPL SMC run
+- [`tp_parse_mcmc()`](http://treeppl.org/treepplr/reference/tp_parse_mcmc.md)
+  : Parse the output of a TreePPL MCMC run
 - [`tp_parse_host_rep()`](http://treeppl.org/treepplr/reference/tp_parse_host_rep.md)
   : Parse TreePPL json output for host repertoire model
-- [`tp_parse_mcmc()`](http://treeppl.org/treepplr/reference/tp_parse_mcmc.md)
-  : Parse simple TreePPL json MCMC output
-- [`tp_parse_smc()`](http://treeppl.org/treepplr/reference/tp_parse_smc.md)
-  : Parse simple TreePPL json SMC output
-- [`tp_phylo_to_tpjson()`](http://treeppl.org/treepplr/reference/tp_phylo_to_tpjson.md)
-  : Convert phylo obj to TreePPL tree
-- [`tp_phylo_to_tppl_tree()`](http://treeppl.org/treepplr/reference/tp_phylo_to_tppl_tree.md)
-  : Convert phylo to a tppl_tree
-- [`tp_run()`](http://treeppl.org/treepplr/reference/tp_run.md) : Run a
-  TreePPL program
-- [`tp_run_options()`](http://treeppl.org/treepplr/reference/tp_run_options.md)
-  : Options that can be passed to a TreePPL program
+- [`tp_map_tree()`](http://treeppl.org/treepplr/reference/tp_map_tree.md)
+  : Find the Maximum A Posteriori (MAP) Tree from weighted samples
+
+## Diagnostics
+
 - [`tp_smc_convergence()`](http://treeppl.org/treepplr/reference/tp_smc_convergence.md)
   : Check for convergence across multiple SMC sweeps.
+- [`tp_mcmc_convergence()`](http://treeppl.org/treepplr/reference/tp_mcmc_convergence.md)
+  : Assess MCMC convergence for a TreePPL analysis
+
+## Utilities
+
 - [`tp_tempdir()`](http://treeppl.org/treepplr/reference/tp_tempdir.md)
-  : Temporary directory for running treeppl
-- [`tp_treeppl_json()`](http://treeppl.org/treepplr/reference/tp_treeppl_json.md)
-  : Convert a tppl_tree to TreePPL json str
-- [`tp_write_data()`](http://treeppl.org/treepplr/reference/tp_write_data.md)
-  : Write data to file
-- [`tp_write_model()`](http://treeppl.org/treepplr/reference/tp_write_model.md)
-  : Write out a custom model to tp_tempdir()
-- [`tree_age_cumul()`](http://treeppl.org/treepplr/reference/tree_age_cumul.md)
-  : Calculate age in a tppl_tree
+  : Temporary directory for running TreePPL
+- [`tp_open_dir()`](http://treeppl.org/treepplr/reference/tp_open_dir.md)
+  : Open a directory in the system's file browser
+- [`tp_open_tppl()`](http://treeppl.org/treepplr/reference/tp_open_tppl.md)
+  : Open a file in the editor

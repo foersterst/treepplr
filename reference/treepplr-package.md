@@ -16,3 +16,12 @@ Useful links:
 
 **Maintainer**: Mariana P Braga <mpiresbr@gmail.com>
 ([ORCID](https://orcid.org/0000-0002-1253-2536))
+
+Authors:
+
+- Mariana P Braga <mpiresbr@gmail.com>
+  ([ORCID](https://orcid.org/0000-0002-1253-2536))
+
+- Tim Virgoulay
+
+- Stenio Foerster

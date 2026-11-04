@@ -1,8 +1,7 @@
-# Platform-dependent treeppl self-contained installation
+# Platform-dependent TreePPL self-contained installation
 
-`tp_installing_treeppl` will search for the local version tpplc
-associate with the package. Will download it if it's not detected on the
-computer.
+`tp_installing_treeppl()` looks for the `tpplc` compiler associated with
+the package and, if it is not found, downloads and unpacks it.
 
 ## Usage
 
@@ -14,14 +13,28 @@ tp_installing_treeppl(download = TRUE, keep_previous = FALSE)
 
 - download:
 
-  Will download the associate tpplc version in the dir next to your
-  local treepplr installation if not present.
+  Logical. Download the associated `tpplc` version if it is not present
+  locally.
 
 - keep_previous:
 
-  Will download the associate tpplc version in the dir next to your
-  local treepplr installation if not present.
+  Logical. Keep previously downloaded `tpplc` versions instead of
+  deleting them before the new download.
 
 ## Value
 
-The path for TreePPL compiler.
+The path to the TreePPL compiler.
+
+## Details
+
+The search order is:
+
+1.  the `TPPLC` environment variable;
+
+2.  on Windows, a manual installation of `tpplc` (no self-contained
+    build is available);
+
+3.  an already unpacked copy in `/tmp`;
+
+4.  a downloaded tarball in the `treeppl` directory next to the local
+    treepplr installation (downloaded first if `download = TRUE`).

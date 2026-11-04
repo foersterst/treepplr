@@ -1,62 +1,111 @@
-# Import data for TreePPL program
+# Write the JSON input file for a TreePPL model
 
-Prepare data input for
+`tp_data()` writes the R objects in `data` to a JSON file that a TreePPL
+sampler can read, and checks the file against the model's arguments.
+Pass the result to
 [`tp_run()`](http://treeppl.org/treepplr/reference/tp_run.md).
 
 ## Usage
 
 ``` r
-tp_data(data_input, data_file_name = "tmp_data_file", dir = tp_tempdir())
+tp_data(model, data, filename = NULL, check = TRUE, print = TRUE)
 ```
 
 ## Arguments
 
-- data_input:
+- model:
 
-  One of the following options:
+  Name of a model in the TreePPL model library (see
+  [`tp_model_library()`](http://treeppl.org/treepplr/reference/tp_model_library.md)),
+  e.g. `"crbd"`, or the path to a `.tppl` model file.
 
-  - A named list (or structured list) containing TreePPL data, OR
+- data:
 
-  - The full path of a multiple sequence alignment in fasta (.fasta,
-    .fas) or nexus (.nexus, .nex) format, OR
+  A named list with one element per model argument.
 
-  - For test data, a string with the name of a model supported by
-    treepplr (see
-    [`tp_model_library()`](http://treeppl.org/treepplr/reference/tp_model_library.md)).
+- filename:
 
-- data_file_name:
+  Path of the JSON file to write. If `NULL` (default), the file is
+  written to
+  [`tp_tempdir()`](http://treeppl.org/treepplr/reference/tp_tempdir.md)
+  and named after the model and a hash of `data`, so the same data
+  always gets the same file name and different data a different one.
 
-  An optional name for the file created. Ignored if `data_input` is the
-  name of a model from the TreePPL library.
+- check:
 
-- dir:
+  Logical. If `TRUE` (default), check the written file against the model
+  with
+  [`tp_input_check()`](http://treeppl.org/treepplr/reference/tp_input_check.md)
+  and print the result.
 
-  The directory where you want to save the data file in JSON format.
-  Default is [`base::tempdir()`](https://rdrr.io/r/base/tempfile.html).
-  Ignored if `data_input` is the name of a model from the TreePPL
-  library.
+- print:
+
+  Logical. If `TRUE` (default), print a summary of the input file: its
+  path, the model and the arguments it expects.
 
 ## Value
 
-The path for the data file that will be used by
-[`tp_run()`](http://treeppl.org/treepplr/reference/tp_run.md).
+Invisibly, a list of class `tpData` with elements:
+
+- `data_path`: path to the JSON file.
+
+- `model_name`: the model's name.
+
+- `expect_args`: the model's argument names, in signature order.
+
+- `expect_types`: the TreePPL type of each argument.
+
+- `expect_class`: the R object expected for each argument.
+
+Typing the object at the console prints its summary again (see
+[`print.tpData()`](http://treeppl.org/treepplr/reference/print.tpData.md)).
 
 ## Details
 
-`data_input`: The name of each list element has to match the name of a
-model input, which is defined in the TreePPL model code.
+Each element of `data` must be named exactly like an argument of the
+model; the order does not matter. Use
+[`tp_expected_input()`](http://treeppl.org/treepplr/reference/tp_expected_input.md)
+to see the names and the R object each argument expects.
+
+Trees must be given as `tpPhylo` objects, built from a `phylo` tree with
+[`tp_phylo_to_tpPhylo()`](http://treeppl.org/treepplr/reference/tp_phylo_to_tpPhylo.md).
+A `phylo` object in `data` is not converted automatically and stops
+`tp_data()` with an error.
+
+The file is written with the settings TreePPL needs: values of length 1
+become plain JSON values, numbers keep full precision, and matrices are
+written row by row.
+
+## See also
+
+[`tp_expected_input()`](http://treeppl.org/treepplr/reference/tp_expected_input.md)
+for the arguments a model expects,
+[`tp_phylo_to_tpPhylo()`](http://treeppl.org/treepplr/reference/tp_phylo_to_tpPhylo.md)
+to build trees,
+[`tp_run()`](http://treeppl.org/treepplr/reference/tp_run.md) to run a
+sampler on the file.
 
 ## Examples
 
 ``` r
 if (FALSE) { # \dontrun{
-# Example using a model name supported by TreePPL
-input <- tp_data("tree_inference")
-input
+phy <- ape::read.tree(text = "((A:4,B:4):6,(C:7,D:7):3);")
 
-# Example using an internal FASTA file (same input data as before, but in fasta format)
-fasta_file <- system.file("extdata", "tree_inference.fasta", package = "treepplr")
-input <- tp_data(fasta_file)
-input
+# Diversification model: a tree and the sampling fraction
+d <- tp_data(
+  model = "crbd",
+  data = list(tree = tp_phylo_to_tpPhylo(phy), rho = 0.5)
+)
+d            # prints the summary again
+d$data_path  # path to the JSON file
+
+# Write to a chosen file, without the check or the summary
+d <- tp_data(
+  model = "crbd",
+  data = list(tree = tp_phylo_to_tpPhylo(phy), rho = 0.5),
+  filename = "crbd_input.json",
+  check = FALSE,
+  print = FALSE
+)
 } # }
 ```

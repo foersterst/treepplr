@@ -22,14 +22,14 @@ You can install treepplr like so:
 
 ``` r
 
-if(!require("devtools", quietly = TRUE)) {
-  install.packages("devtools")
-  library(devtools)
+if(!require("pak", quietly = TRUE)) {
+  install.packages("pak")
+  library(pak)
 } else {
- library(devtools)
+ library(pak)
 }
 
-devtools::install_github("treeppl/treepplr")
+pak::pak("treeppl/treepplr")
 ```
 
 This will only install the R package. The TreePPL compiler will not be

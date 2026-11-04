@@ -2,10 +2,17 @@ Package: treepplr
 Title: R Interface to TreePPL
 Version: 0.15.0
 Authors@R: c(
-    person("Mariana", "P Braga", , "mpiresbr@gmail.com", role = c("aut", "cre"),
-           comment = c(ORCID = "0000-0002-1253-2536")),
-    person("Tim", "Virgoulay", role = "aut"),
-    person("Stenio", "Foerster", role = "aut")
+    person(
+    "Mariana P", "Braga",
+    role = c("aut", "cre"),
+    email = "mpiresbr@gmail.com",
+    comment = c(ORCID = "0000-0002-1253-2536")),
+    person(
+    "Stenio", "I A Foerster",
+    role = c("aut", "cre"),
+    email = "stenioit@gmail.com",
+    comment = c(ORCID = "0000-0001-9639-9009")),
+    person("Tim", "Virgoulay", role = "aut")
   )
 Description: This package in an interface for using TreePPL programs.
 License: MIT + file LICENSE

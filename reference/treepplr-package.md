@@ -22,6 +22,7 @@ Authors:
 - Mariana P Braga <mpiresbr@gmail.com>
   ([ORCID](https://orcid.org/0000-0002-1253-2536))
 
-- Tim Virgoulay
+- Stenio I A Foerster <stenioit@gmail.com>
+  ([ORCID](https://orcid.org/0000-0001-9639-9009))
 
-- Stenio Foerster
+- Tim Virgoulay

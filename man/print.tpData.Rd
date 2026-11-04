@@ -19,3 +19,4 @@ Console method for objects returned by \code{\link[=tp_data]{tp_data()}}. It sho
 the JSON file, the model name and the arguments written to the file, with
 the R object each one was built from.
 }
+\keyword{internal}

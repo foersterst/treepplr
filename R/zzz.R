@@ -11,6 +11,7 @@
 #' @description
 #' TreePPL program version in use for this package version
 #'@export
+#'@keywords internal
 TPPLC_VERSION <- "0.4"
 
 .onLoad <- function(libname, pkgname){

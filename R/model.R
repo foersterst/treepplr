@@ -422,6 +422,8 @@ tp_sampler <- function(model, method = "mcmc", print = TRUE, ...) {
 #'
 #' @return `x`, invisibly.
 #'
+#' @keywords internal
+#'
 #' @export
 print.tpSampler <- function(x, ...) {
   cli::cli_h2("TreePPL Sampler")

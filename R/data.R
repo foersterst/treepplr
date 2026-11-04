@@ -847,6 +847,8 @@ tp_input_check <- function(json, tppl) {
 #'
 #' @return `x`, invisibly.
 #'
+#' @keywords internal
+#'
 #' @export
 print.tpEdata <- function(x, ...) {
   cli::cli_h2("Expected Input")
@@ -881,6 +883,8 @@ print.tpEdata <- function(x, ...) {
 #' @param ... Not used; present for compatibility with [print()].
 #'
 #' @return `x`, invisibly.
+#'
+#' @keywords internal
 #'
 #' @export
 print.tpIcheck <- function(x, ...) {
@@ -922,6 +926,8 @@ print.tpIcheck <- function(x, ...) {
 #'
 #' @return `x`, invisibly.
 #'
+#' @keywords internal
+#'
 #' @export
 print.tpData <- function(x, ...) {
   cli::cli_h2("Data Input")
@@ -952,6 +958,8 @@ print.tpData <- function(x, ...) {
 #' @param ... Not used; present for compatibility with [print()].
 #'
 #' @return `x`, invisibly.
+#'
+#' @keywords internal
 #'
 #' @export
 print.tpPhylo <- function(x, ...) {

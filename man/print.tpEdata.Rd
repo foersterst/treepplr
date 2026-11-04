@@ -19,3 +19,4 @@ Console method for objects returned by \code{\link[=tp_expected_input]{tp_expect
 model file, the model name and one line per argument, in green, with the R
 object to supply in brackets.
 }
+\keyword{internal}

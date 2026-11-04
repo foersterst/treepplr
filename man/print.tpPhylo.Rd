@@ -19,3 +19,4 @@ Console method for objects returned by \code{\link[=tp_phylo_to_tpPhylo]{tp_phyl
 \code{print.phylo()}, it gives the number of tips and internal nodes and the
 root age.
 }
+\keyword{internal}

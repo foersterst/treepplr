@@ -19,3 +19,4 @@ Console method for objects returned by \code{\link[=tp_input_check]{tp_input_che
 shown with a green tick; otherwise missing arguments are shown in red,
 extra fields in yellow, and a pointer to \code{\link[=tp_expected_input]{tp_expected_input()}}.
 }
+\keyword{internal}

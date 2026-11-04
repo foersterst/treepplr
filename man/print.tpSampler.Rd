@@ -19,3 +19,4 @@ Console method for objects returned by \code{\link[=tp_sampler]{tp_sampler()}}. 
 the compiled executable, the model file, the inference method and, if any,
 the compile options.
 }
+\keyword{internal}

@@ -1,4 +1,64 @@
 url: http://treeppl.org/treepplr/
+
 template:
   bootstrap: 5
+  theme: github-dark
+  bslib:
+    bg: "#1E2227"
+    fg: "#D7DAE0"
+    primary: "#F2B544"
+    base_font: {google: "Source Sans 3"}
+    heading_font: {google: "Space Grotesk"}
+    code_font: {google: "Cascadia Mono"}
+    code-font-size: 0.80em
 
+navbar:
+  structure:
+    left: [intro, reference, articles, news]
+    right: [search, github]
+
+reference:
+- title: Installation
+  contents:
+  - tp_installing_treeppl
+  - tp_treeppl_options
+- title: Models
+  contents:
+  - tp_model_library
+  - tp_expected_input
+  - tp_write_model
+- title: Preparing input
+  contents:
+  - tp_phylo_to_tpPhylo
+  - tp_dna_to_int
+  - tp_matrix_to_tppl
+  - tp_write_tppl_json
+  - tp_data
+  - tp_input_check
+- title: Running TreePPL
+  contents:
+  - tp_sampler
+  - tp_run
+  - tp_list
+- title: Reading output
+  contents:
+  - tp_parse_smc
+  - tp_parse_mcmc
+  - tp_parse_host_rep
+  - tp_map_tree
+- title: Diagnostics
+  contents:
+  - tp_smc_convergence
+  - tp_mcmc_convergence
+- title: Utilities
+  contents:
+  - tp_tempdir
+  - tp_open_dir
+  - tp_open_tppl
+
+articles:
+- title: Getting started
+  contents:
+  - articles/building-trees
+  - coin-example
+  - crbd-example

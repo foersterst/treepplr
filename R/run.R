@@ -228,6 +228,11 @@ tp_run <- function(
     if (startsWith(method, "smc")) {
       return(tp_parse_smc(files))
     }
+
+    if (startsWith(method, "is")) {
+      return(tp_parse_smc(files))
+    }
+
     if (startsWith(method, "mcmc")) {
       return(tp_parse_mcmc(files))
     }

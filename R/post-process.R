@@ -59,7 +59,7 @@ tp_parse_smc <- function(json_path) {
 
     # Skip sweeps with no samples or a NaN / -Inf normalising constant
     if (length(sweep$samples) == 0 || length(norm_const) != 1 ||
-        !is.finite(norm_const)) {
+      !is.finite(norm_const)) {
       return(NULL)
     }
 
@@ -255,15 +255,19 @@ tp_parse_mcmc <- function(json_path) {
 #' res$tree_score
 #'
 #' # The 5 most probable topologies after the MAP topology
-#' top <- tp_summarise_trees("out.json", method = "MAP", samples = 5,
-#'                           random = FALSE, tip_labels = names(aln))
+#' top <- tp_summarise_trees("out.json",
+#'   method = "MAP", samples = 5,
+#'   random = FALSE, tip_labels = names(aln)
+#' )
 #' top$sample_scores
 #' }
-tp_summarise_trees <- function(trees,
-                               method = c("MAP", "MCC"),
-                               samples = 1,
-                               random = TRUE,
-                               tip_labels = NULL) {
+tp_summarise_trees <- function(
+  trees,
+  method = c("MAP", "MCC"),
+  samples = 1,
+  random = TRUE,
+  tip_labels = NULL
+) {
   method <- match.arg(method)
   .check_summary_args(samples, random)
 
@@ -452,12 +456,14 @@ tp_summarise_trees <- function(trees,
     isTRUE(samples >= 1 && samples == round(samples))
   if (!is_count) {
     cli::cli_abort(
-      "{.arg samples} must be a single positive whole number.", call = call
+      "{.arg samples} must be a single positive whole number.",
+      call = call
     )
   }
   if (!isTRUE(random) && !isFALSE(random)) {
     cli::cli_abort(
-      "{.arg random} must be {.code TRUE} or {.code FALSE}.", call = call
+      "{.arg random} must be {.code TRUE} or {.code FALSE}.",
+      call = call
     )
   }
 }
@@ -468,7 +474,8 @@ tp_summarise_trees <- function(trees,
   n_tips <- unique(vapply(parts, `[[`, integer(1), "n_tips"))
   if (length(n_tips) != 1) {
     cli::cli_abort(
-      "The sampled trees don't all have the same number of tips.", call = call
+      "The sampled trees don't all have the same number of tips.",
+      call = call
     )
   }
   if (is.null(tip_labels)) {

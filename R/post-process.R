@@ -1,17 +1,19 @@
 # Exported Functions ----------------------------------------------------------------
 
-#' Parse the output of a TreePPL SMC run
+#' Parse the output of a TreePPL SMC or IS run
 #'
 #' @description
 #' `tp_parse_smc()` reads the JSON output of a TreePPL run with a sequential
-#' Monte Carlo method (e.g. `"smc-bpf"`, `"smc-apf"`) and returns the samples,
-#' their weights and the normalising constant of each sweep as a tibble.
+#' Monte Carlo method (e.g. `"smc-bpf"`, `"smc-apf"`) or with importance
+#' sampling (`"is"`), and returns the samples, their weights and the
+#' normalising constant of each sweep as a tidy data frame (tibble).
 #'
 #' @details
-#' Each line of an SMC output file is one sweep, with the particles' `samples`,
-#' their log `weights` and the sweep's log normalising constant (`normConst`).
-#' TreePPL writes NaN and infinite values as `{"__float__": "-inf"}`; these are
-#' read as R's `NaN`, `Inf` and `-Inf`.
+#' Each line of the output is one sweep, with the particles' `samples`, their
+#' log `weights` and the sweep's log normalising constant (`normConst`).
+#' Output written with `subsample = TRUE` has the same format, with fewer
+#' particles per sweep. TreePPL writes NaN and infinite values as
+#' `{"__float__": "-inf"}`; these are read as R's `NaN`, `Inf` and `-Inf`.
 #'
 #' Sweeps are skipped when they have no samples (every particle had zero
 #' weight) or a normalising constant that is NaN or `-Inf`; a message reports
@@ -25,113 +27,82 @@
 #'
 #' Parameters are named after the fields of the model's return type when the
 #' output has them (e.g. `lambda`, `mu`), and `x1`, `x2`, ... otherwise.
-#' Non-scalar values (vectors, trees) are kept as list-columns.
+#' Non-scalar values (vectors, trees) are kept as list-columns; for trees, use
+#' [tp_summarise_trees()].
 #'
 #' @param json_path Path(s) to one or more JSON output files, as returned by
 #'   [tp_run()]. Sweeps are numbered consecutively across files.
-#' @param wide Logical. If `TRUE` (default), one row per particle and one
-#'   column per parameter. If `FALSE`, one row per particle and parameter, with
-#'   columns `parameter` and `sample`.
 #'
-#' @return A tibble with columns:
+#' @return A tibble (tidy data frame) with one row per particle and columns:
 #'   * `sweep`: sweep number.
 #'   * `particle`: particle number within its sweep.
 #'   * `log_weight`: the particle's log weight.
 #'   * `norm_constant`: the sweep's log normalising constant.
 #'   * `norm_weight`: the normalised weight (see Details).
-#'   * one column per parameter (`wide = TRUE`), or `parameter` and `sample`
-#'     (`wide = FALSE`).
+#'   * one column per parameter.
 #'
-#' @seealso [tp_run()], which calls this function for SMC runs, and
+#' @seealso [tp_run()], which calls this function for SMC and IS runs, and
 #'   [tp_parse_mcmc()] for MCMC output.
 #'
 #' @export
 #'
 #' @examples
 #' \dontrun{
-#' sampler <- tp_sampler(model = "crbd", method = "smc-bpf")
-#' data <- tp_data(model = "crbd", dataList = list(tree = tree, rho = 0.5))
-#' run <- tp_run(sampler, data, particles = 1000, sweeps = 10)
-#'
-#' # Parse an output file directly
 #' samples <- tp_parse_smc("out.json")
-#' samples_long <- tp_parse_smc("out.json", wide = FALSE)
 #' }
-tp_parse_smc <- function(json_path, wide = TRUE) {
-  # One line = one sweep
-  lines <- unlist(lapply(json_path, readLines, warn = FALSE))
-  lines <- lines[nzchar(lines)]
-
-  # TreePPL writes NaN/Inf as {"__float__": "-inf"}; turn them into strings
-  # ("-inf", "inf", "nan") that as.numeric() understands, so every sweep
-  # simplifies to plain vectors and matrices
-  lines <- gsub(
-    '\\{\\s*"__float__"\\s*:\\s*"([^"]*)"\\s*\\}', '"\\1"', lines, perl = TRUE
-  )
+tp_parse_smc <- function(json_path) {
+  lines <- .read_tppl_lines(json_path)
 
   sweeps <- lapply(seq_along(lines), function(i) {
-    sweep <- jsonlite::fromJSON(lines[i], simplifyVector = TRUE)
-    norm_const <- suppressWarnings(as.numeric(sweep$normConst))
+    sweep <- jsonlite::parse_json(lines[i])
+    norm_const <- .as_num(sweep$normConst)
 
     # Skip sweeps with no samples or a NaN / -Inf normalising constant
-    if (length(sweep$samples) == 0 || !is.finite(norm_const)) {
+    if (length(sweep$samples) == 0 || length(norm_const) != 1 ||
+        !is.finite(norm_const)) {
       return(NULL)
     }
 
-    samples <- sweep$samples
-    if (is.data.frame(samples)) {
-      samples <- samples[["__data__"]] # named parameters
-    } else {
-      samples <- as.data.frame(samples) # unnamed: x1, x2, ...
-      names(samples) <- paste0("x", seq_along(samples))
-    }
-
-    log_weight <- suppressWarnings(as.numeric(sweep$weights))
+    samples <- .samples_to_df(sweep$samples)
+    log_weight <- .as_num(unlist(sweep$weights, use.names = FALSE))
     if (length(log_weight) != nrow(samples)) {
       cli::cli_abort(
         "Sweep {i}: {nrow(samples)} samples but {length(log_weight)} weights."
       )
     }
 
-    data.frame(
-      sweep = i,
-      particle = seq_along(log_weight),
-      log_weight = log_weight,
-      norm_constant = norm_const,
+    c(
+      list(
+        sweep = rep(i, nrow(samples)),
+        particle = seq_len(nrow(samples)),
+        log_weight = log_weight,
+        norm_constant = rep(norm_const, nrow(samples))
+      ),
       samples
     )
   })
 
-  n_kept <- sum(!vapply(sweeps, is.null, logical(1)))
-  if (n_kept == 0) {
+  kept <- !vapply(sweeps, is.null, logical(1))
+  if (!any(kept)) {
     cli::cli_abort(c(
       "No sweep returned usable samples: every particle had zero weight.",
       "i" = "Try more particles, or check the input data and priors."
     ))
   }
-  if (n_kept < length(lines)) {
-    n_skipped <- length(lines) - n_kept
+  if (!all(kept)) {
+    n_skipped <- sum(!kept)
     cli::cli_inform(c(
       "i" = "Skipped {n_skipped} of {length(lines)} sweep{?s} with no usable samples."
     ))
   }
 
-  df <- do.call(rbind, sweeps)
+  df <- .bind_columns(sweeps[kept])
   df <- df[is.finite(df$log_weight), , drop = FALSE]
   total <- df$log_weight + df$norm_constant
   df$norm_weight <- exp(total - max(total))
 
   id_cols <- c("sweep", "particle", "log_weight", "norm_constant", "norm_weight")
-  params <- setdiff(names(df), id_cols)
-  df <- tibble::as_tibble(df[c(id_cols, params)])
-
-  if (!wide) {
-    return(tidyr::pivot_longer(
-      df, tidyr::all_of(params),
-      names_to = "parameter", values_to = "sample"
-    ))
-  }
-  df
+  df[c(id_cols, setdiff(names(df), id_cols))]
 }
 
 #' Parse the output of a TreePPL MCMC run
@@ -156,84 +127,48 @@ tp_parse_smc <- function(json_path, wide = TRUE) {
 #'
 #' Parameters are named after the fields of the model's return type when the
 #' output has them (e.g. `lambda`, `mu`), and `x1`, `x2`, ... otherwise.
-#' Non-scalar values (vectors, trees) are kept as list-columns.
+#' Non-scalar values (vectors, trees) are kept as list-columns; for trees, use
+#' [tp_summarise_trees()].
 #'
 #' Files without samples are skipped with a warning. If no file has samples,
 #' the function stops with an error.
 #'
 #' @param json_path Path(s) to one or more JSON output files, as returned by
 #'   [tp_run()]. Each file is one run.
-#' @param wide Logical. If `TRUE` (default), one row per iteration and one
-#'   column per parameter. If `FALSE`, one row per iteration and parameter,
-#'   with columns `parameter` and `sample`.
 #'
-#' @return A tibble (tidy data frame) with columns:
+#' @return A tibble (tidy data frame) with one row per iteration and columns:
 #'   * `run`: run number, in the order of `json_path`.
 #'   * `iteration`: iteration number within its run.
-#'   * one column per parameter (`wide = TRUE`), or `parameter` and `sample`
-#'     (`wide = FALSE`).
+#'   * one column per parameter.
 #'
 #' @seealso [tp_run()], which calls this function for MCMC runs, and
-#'   [tp_parse_smc()] for SMC output.
+#'   [tp_parse_smc()] for SMC and IS output.
 #'
 #' @export
 #'
 #' @examples
 #' \dontrun{
-#' sampler <- tp_sampler(model = "crbd", method = "mcmc")
-#' run <- tp_run(sampler, data, iterations = 1000, n_runs = 2)
-#'
-#' # Parse output files directly
 #' samples <- tp_parse_mcmc(c("out1.json", "out2.json"))
-#' samples_long <- tp_parse_mcmc("out1.json", wide = FALSE)
-#'
-#' # Incremental printing gives the same result
-#' sampler <- tp_sampler(model = "crbd", method = "mcmc", incremental_printing = TRUE)
-#' run <- tp_run(sampler, data, iterations = 1000)
 #' }
-tp_parse_mcmc <- function(json_path, wide = TRUE) {
+tp_parse_mcmc <- function(json_path) {
   runs <- lapply(seq_along(json_path), function(run_id) {
-    lines <- readLines(json_path[run_id], warn = FALSE)
-    lines <- lines[nzchar(trimws(lines))]
-
-    # TreePPL writes NaN/Inf as {"__float__": "nan"}; turn them into strings
-    # that as.numeric() understands, so samples simplify to plain vectors
-    lines <- gsub(
-      '\\{\\s*"__float__"\\s*:\\s*"([^"]*)"\\s*\\}', '"\\1"', lines, perl = TRUE
-    )
-
-    # Two output formats:
-    # * default: one summary line {"samples": [...], "weights": ..., ...}
-    # * --incremental-printing: one sample per line, then an (empty) summary
-    is_summary <- grepl('^\\s*\\{\\s*"samples"\\s*:', lines)
-    sample_lines <- lines[!is_summary]
-
-    samples <- if (length(sample_lines) > 0) {
-      # Parse all sample lines in one call by wrapping them in a JSON array
-      jsonlite::fromJSON(
-        paste0("[", paste(sample_lines, collapse = ","), "]"),
-        simplifyVector = TRUE
-      )
-    } else if (any(is_summary)) {
-      jsonlite::fromJSON(lines[which(is_summary)[1]], simplifyVector = TRUE)$samples
-    }
+    samples <- .read_mcmc_samples(json_path[run_id])
 
     if (length(samples) == 0) {
-      cli::cli_warn("No samples found in {.file {json_path[run_id]}}; skipping it.")
+      cli::cli_warn(
+        "No samples found in {.file {json_path[run_id]}}; skipping it."
+      )
       return(NULL)
     }
 
-    if (is.data.frame(samples)) {
-      samples <- samples[["__data__"]] # named parameters
-    } else {
-      samples <- as.data.frame(matrix(
-        suppressWarnings(as.numeric(samples)),
-        nrow = NROW(samples)
-      ))
-      names(samples) <- paste0("x", seq_along(samples))
-    }
-
-    data.frame(run = run_id, iteration = seq_len(nrow(samples)), samples)
+    samples <- .samples_to_df(samples)
+    c(
+      list(
+        run = rep(run_id, nrow(samples)),
+        iteration = seq_len(nrow(samples))
+      ),
+      samples
+    )
   })
 
   runs <- runs[!vapply(runs, is.null, logical(1))]
@@ -241,399 +176,545 @@ tp_parse_mcmc <- function(json_path, wide = TRUE) {
     cli::cli_abort("No run returned any samples.")
   }
 
-  df <- tibble::as_tibble(do.call(rbind, runs))
-
-  if (!wide) {
-    params <- setdiff(names(df), c("run", "iteration"))
-    return(tidyr::pivot_longer(
-      df, tidyr::all_of(params),
-      names_to = "parameter", values_to = "sample"
-    ))
-  }
-  df
+  .bind_columns(runs)
 }
 
-
-
-
-
-#' Parse TreePPL json output for host repertoire model
+#' Summarise the trees sampled in a TreePPL run
 #'
 #' @description
-#' `tp_parse_host_rep` takes TreePPL json output from inference with the
-#' model of host repertoire evolution and returns a data.frame
-#'
-#' @param treeppl_out a character vector giving the TreePPL json output
-#' produced by [tp_run].
-#'
-#' @return A list (n = sweeps) of data frames with the output from inference
-#' in TreePPL under the host repertoire evolution model.
-#' @export
-
-tp_parse_host_rep <- function(treeppl_out) {
-  result_list <- list()
-
-  for (index in seq_along(treeppl_out)) {
-    output_trppl <- treeppl_out[[index]]
-
-    nbr_lam <- length(output_trppl[1][[1]][[1]][[1]]$lambda)
-    nbr_col <- 14 + nbr_lam
-    name_lam <- c()
-
-    for (i in 1:nbr_lam) {
-      name_lam <- c(name_lam, paste0("lambda", i))
-    }
-
-    result <- data.frame(matrix(ncol = nbr_col, nrow = 0))
-
-    colnames(result) <- c(
-      "iteration",
-      "log_weight",
-      "log_norm_const",
-      "mu",
-      "beta",
-      name_lam,
-      "node_index",
-      "branch_start_time",
-      "branch_end_time",
-      "start_state",
-      "end_state",
-      "transition_time",
-      "parent_index",
-      "child1_index",
-      "child2_index"
-    )
-
-    # for (i in seq_along(output_trppl[1][[1]])) {
-    for (i in seq_along(output_trppl$samples)) {
-      res <- data.frame(matrix(ncol = nbr_col, nrow = 0))
-      colnames(res) <- c(
-        "iteration",
-        "log_weight",
-        "log_norm_const",
-        "mu",
-        "beta",
-        name_lam,
-        "node_index",
-        "branch_start_time",
-        "branch_end_time",
-        "start_state",
-        "end_state",
-        "transition_time",
-        "parent_index",
-        "child1_index",
-        "child2_index"
-      )
-
-      tree <- output_trppl[1][[1]][[i]][[1]]$tree$`__data__`
-
-      state <- paste(tree$repertoire, collapse = "")
-
-      lambda <- output_trppl[1][[1]][[i]][[1]]$lambda
-
-      names(lambda) <- name_lam
-
-      res <- peel_tree(
-        tree,
-        i,
-        pindex = NA,
-        output_trppl$weights[i],
-        output_trppl$normConst,
-        output_trppl[1][[1]][[i]][[1]]$mu,
-        output_trppl[1][[1]][[i]][[1]]$beta,
-        lambda,
-        prev_age = NA,
-        state,
-        res
-      )
-      result <- rbind(result, res)
-    }
-    result_list[[index]] <- result
-  }
-  return(result_list)
-}
-
-# Recursive function to go deep in the tree
-peel_tree <- function(subtree,
-                      index,
-                      pindex,
-                      lweight,
-                      lnorm_const,
-                      mu,
-                      beta,
-                      lambda,
-                      prev_age,
-                      start_state,
-                      result) {
-  base <- c(
-    iteration = as.numeric(index - 1),
-    log_weight = as.numeric(lweight),
-    log_norm_const = as.numeric(lnorm_const),
-    mu = as.numeric(mu),
-    beta = as.numeric(beta),
-    lambda,
-    node_index = as.numeric(subtree$label - 1),
-    branch_start_time = as.numeric(prev_age),
-    branch_end_time = as.numeric(subtree$age),
-    start_state = as.numeric(start_state),
-    end_state = NA,
-    transition_time = NA,
-    parent_index = as.numeric(pindex),
-    child1_index = NA,
-    child2_index = NA
-  )
-
-  if (!is.null(subtree$left)) {
-    base[["child1_index"]] <-
-      as.numeric(subtree$left$`__data__`$label - 1)
-    base[["child2_index"]] <-
-      as.numeric(subtree$right$`__data__`$label - 1)
-  }
-
-  base[["end_state"]] <- base[["start_state"]]
-
-  chang_nbr <- length(subtree$history)
-  if (chang_nbr != 0) {
-    df <- data.frame(matrix(ncol = 2, nrow = chang_nbr))
-    for (i in 1:chang_nbr) {
-      # "end_state"
-      df[i, 1] <-
-        as.numeric(paste(subtree$history[[i]]$`__data__`$repertoire,
-          collapse = ""
-        ))
-      # "transition_time"
-      df[i, 2] <- as.numeric(subtree$history[[i]]$`__data__`$age)
-    }
-    df <- df[order(-df$X2), ]
-    for (j in 1:chang_nbr) {
-      base[["start_state"]] <- base[["end_state"]]
-      base[["end_state"]] <- df[j, 1]
-      base[["transition_time"]] <- df[j, 2]
-      result[nrow(result) + 1, ] <- base
-    }
-  } else {
-    result[nrow(result) + 1, ] <- base
-  }
-
-  if (!is.null(subtree$left)) {
-    result <- peel_tree(
-      subtree$left$`__data__`,
-      index,
-      subtree$label - 1,
-      lweight,
-      lnorm_const,
-      mu,
-      beta,
-      lambda,
-      subtree$age,
-      base[["end_state"]],
-      result
-    )
-    result <- peel_tree(
-      subtree$right$`__data__`,
-      index,
-      subtree$label - 1,
-      lweight,
-      lnorm_const,
-      mu,
-      beta,
-      lambda,
-      subtree$age,
-      base[["end_state"]],
-      result
-    )
-  }
-  result
-}
-
-
-#' Check for convergence across multiple SMC sweeps.
-#'
-#' @param treeppl_out a data frame outputted by [tp_parse_smc()].
-#'
-#' @returns Variance in the normalizing constants across SMC sweeps.
-#' @export
-#'
-tp_smc_convergence <- function(treeppl_out) {
-  zs <- treeppl_out |>
-    dplyr::slice_head(n = 1, by = .data$sweep) |>
-    dplyr::pull(.data$norm_constant)
-
-  return(stats::var(zs))
-}
-
-
-#' Assess MCMC convergence for a TreePPL analysis
-#'
-#' Computes per-parameter effective sample size (ESS) and, when multiple
-#' runs are available, the upper limit of the Gelman-Rubin potential scale
-#' reduction factor (R-hat), using the \pkg{coda} package.
-#'
-#' @param treeppl_out A tibble produced by \code{tp_parse_mcmc()}, in either long
-#' or wide format.
+#' `tp_summarise_trees()` reads the trees from the JSON output of a TreePPL
+#' tree-inference run (SMC, IS or MCMC) and summarises them with one tree: the
+#' maximum a posteriori (MAP) topology or the maximum clade credibility (MCC)
+#' tree. It can also return several trees to represent the uncertainty around
+#' that summary.
 #'
 #' @details
-#' Output produced from an unnamed return type in TreePPL (`.tppl` file) is not
-#' supported and will raise an error, since there is no reliable way to
-#' distinguish multiple parameters.
+#' **Weights.** Each sampled tree gets its posterior weight: for SMC and IS,
+#' `exp(log_weight + norm_constant)` of its particle, normalised over all
+#' particles of all sweeps; for MCMC, all iterations weigh the same. Sweeps
+#' without samples, or with a normalising constant of `-Inf`, are skipped.
 #'
-#' @return A tibble with one row per parameter, containing:
-#'   \describe{
-#'     \item{parameter}{Parameter name.}
-#'     \item{ess}{Effective sample size, pooled across all runs.}
-#'     \item{rhat_upper}{Upper limit of the Gelman-Rubin R-hat statistic.
-#'       Only computed when `treeppl_out` contains more than one run;
-#'       otherwise `NA`, with a message explaining why.}
-#'   }
+#' **Clades and topologies.** Trees are treated as rooted. A clade is the set
+#' of tips below an internal node; a topology is the set of clades of a tree.
+#' * `method = "MAP"`: the score of a tree is the posterior probability of
+#'   its topology (the summed weight of all sampled trees with that topology).
+#'   The summary tree is the topology with the highest probability.
+#' * `method = "MCC"`: the score of a tree is its clade credibility, the
+#'   product of the posterior probabilities of its clades. The summary tree is
+#'   the sampled topology with the highest clade credibility.
+#'
+#' **Node ages.** In a summary tree (and in the trees returned with
+#' `random = FALSE`), each node's age is the weighted mean age of that clade:
+#' over the sampled trees with the same topology (MAP), or over all sampled
+#' trees that contain the clade (MCC). Branch lengths are differences of ages.
+#' Trees returned with `random = TRUE` keep their own sampled branch lengths.
+#'
+#' **Tips.** TreePPL identifies tips by their `index`, the row of the
+#' alignment they came from. Give the taxon names with `tip_labels`, in the
+#' same order as the rows of the alignment (e.g. `rownames()` of the matrix
+#' from [tp_dna_to_int()]); otherwise tips are labelled `"1"`, `"2"`, ...
+#'
+#' @param trees Path(s) to one or more JSON output files of a tree-inference
+#'   model, as returned by [tp_run()].
+#' @param method Summary method: `"MAP"` or `"MCC"` (see Details).
+#' @param samples Number of trees to return to represent uncertainty. With
+#'   `samples = 1` (default) only the summary tree is returned.
+#' @param random Logical. How the `samples` trees are chosen: if `TRUE`
+#'   (default), drawn at random from the posterior sample according to their
+#'   weights; if `FALSE`, the `samples` best-scoring distinct topologies
+#'   ranked right below the summary tree (which is not repeated).
+#' @param tip_labels Optional character vector of taxon names, in the order
+#'   of the alignment rows.
+#'
+#' @return A list with elements:
+#'   * `tree`: the summary tree, a rooted `ape::phylo` object.
+#'   * `tree_score`: its score, a number named after `method`
+#'     (e.g. `c(MAP = 0.42)`).
+#'   * `sample`: only if `samples > 1`, an `ape::multiPhylo` object with the
+#'     `samples` trees.
+#'   * `sample_scores`: only if `samples > 1`, a tibble with one row per tree
+#'     in `sample`: `tree_id`, its position in `sample` (`sample[[tree_id]]`),
+#'     and `score`, its score under `method`.
+#'
+#' @seealso [tp_run()] to produce the output, [tp_parse_smc()] and
+#'   [tp_parse_mcmc()] for models whose output is not trees.
+#'
+#' @export
 #'
 #' @examples
 #' \dontrun{
+#' aln <- ape::read.FASTA("alignment.fasta")
 #'
-#' # CRBD model using MCMC
-#' run_mcmc <- tp_run(
-#' sampler = tp_compile(model = "crbd", method = "mcmc"),
-#' data = tp_data(data_input = "crbd"),
-#' iterations = 10,
-#' n_runs = 2,
-#' n_processes = 2
+#' res <- tp_summarise_trees(
+#'   trees = "out.json",
+#'   method = "MCC",
+#'   samples = 100,
+#'   tip_labels = names(aln)
 #' )
+#' plot(res$tree)
+#' res$tree_score
 #'
-#' # tp_run() already returns the output of tp_parse_mcmc(), so we can call
-#' # tp_mcmc_convergence() directly:
-#' tp_mcmc_convergence(run_mcmc)
+#' # The 5 most probable topologies after the MAP topology
+#' top <- tp_summarise_trees("out.json", method = "MAP", samples = 5,
+#'                           random = FALSE, tip_labels = names(aln))
+#' top$sample_scores
 #' }
-#'
-#' @export
-tp_mcmc_convergence <- function(treeppl_out) {
-  # if the input is in wide format
-  if (!"sample" %in% colnames(treeppl_out)) {
-    treeppl_out <- treeppl_out |>
-      tidyr::pivot_longer(
-        cols = -c("run", "iteration"),
-        names_to = "parameter",
-        values_to = "sample"
+tp_summarise_trees <- function(trees,
+                               method = c("MAP", "MCC"),
+                               samples = 1,
+                               random = TRUE,
+                               tip_labels = NULL) {
+  method <- match.arg(method)
+  .check_summary_args(samples, random)
+
+  draws <- .read_tree_samples(trees)
+  parts <- lapply(draws$trees, .tppl_tree_parts)
+  weight <- exp(draws$log_weight - max(draws$log_weight))
+  weight <- weight / sum(weight)
+  labels <- .tip_labels(parts, tip_labels)
+
+  scored <- .score_trees(parts, weight, method)
+  build_summary <- function(i) {
+    in_set <- if (method == "MAP") {
+      scored$topology == scored$topology[i]
+    } else {
+      rep(TRUE, length(parts))
+    }
+    .summary_phylo(parts, i, in_set, weight, labels)
+  }
+
+  best <- scored$ranked[1]
+  out <- list(
+    tree = build_summary(best),
+    tree_score = stats::setNames(scored$score[best], method)
+  )
+
+  if (samples > 1) {
+    if (random) {
+      idx <- sample.int(
+        length(parts), samples,
+        replace = samples > sum(weight > 0), prob = weight
       )
-  }
-
-  # sanity check
-  has_parameter <- "parameter" %in% names(treeppl_out)
-  if (!has_parameter) {
-    stop(
-      "Output JSON has no parameter names.\n",
-      "Re-run the TreePPL model with a named return type (.tppl file) ",
-      "so that parameters can be identified."
+      sampled <- lapply(idx, function(i) .parts_to_phylo(parts[[i]], labels))
+    } else {
+      idx <- .top_topologies(scored$ranked, samples)
+      sampled <- lapply(idx, build_summary)
+    }
+    if (length(idx) == 0) {
+      return(out) # a single topology was sampled: nothing to rank below it
+    }
+    out$sample <- structure(sampled, class = "multiPhylo")
+    out$sample_scores <- tibble::tibble(
+      tree_id = seq_along(idx),
+      score = scored$score[idx]
     )
   }
 
-  # coda::mcmc objects
-  runs <- sort(unique(treeppl_out$run))
-  parameters <- unique(treeppl_out$parameter)
-
-  chains_by_parameter <- purrr::map(parameters, function(p) {
-    chains <- purrr::map(runs, function(r) {
-      vals <- treeppl_out |>
-        dplyr::filter(.data$run == r, .data$parameter == p) |>
-        dplyr::arrange(.data$iteration) |>
-        dplyr::pull(.data$sample)
-      coda::mcmc(vals)
-    })
-    coda::mcmc.list(chains)
-  })
-  names(chains_by_parameter) <- parameters
-  # ESS
-  ess <- purrr::map_dbl(chains_by_parameter, coda::effectiveSize)
-  result <- tibble::tibble(parameter = names(ess), ess = ess)
-
-  # Gelman and Rubin's R-hat
-  if (length(runs) > 1) {
-    rhat_upper <- purrr::map_dbl(chains_by_parameter, function(chain_list) {
-      coda::gelman.diag(chain_list)$psrf[, "Upper C.I."]
-    })
-    result$rhat_upper <- rhat_upper[result$parameter]
-  } else {
-    result$rhat_upper <- NA
-    message(
-      "Only one run detected; Gelman-Rubin R-hat requires >= 2 runs and was not computed."
-    )
-  }
-
-  if (!has_parameter) {
-    result <- dplyr::select(result, -"parameter")
-  }
-  return(result)
+  out
 }
 
+# Helper Functions ------------------------------------------------------------------
 
-#' Find the Maximum A Posteriori (MAP) Tree from weighted samples
+#' Read the non-empty lines of TreePPL output files
 #'
-#' @param trees_out The list returned by [treepplr::tp_json_to_phylo]
-#' (containing $trees and $weights)
-#'
-#' @returns The MAP tree as a phylo object
-#' @export
-#'
-tp_map_tree <- function(trees_out) {
-  trees <- trees_out$trees
-  weights <- trees_out$weights
-
-  # Handle Log-Weights (Optional Check)
-  # If weights are negative (log-scale), convert them to probabilities first
-  if (any(weights < 0)) {
-    message("Log-weights detected. converting to relative probabilities...")
-    # Subtract max to avoid underflow/overflow issues
-    weights <- exp(weights - max(weights))
+#' TreePPL writes NaN and infinities as `{"__float__": "-inf"}`. They are
+#' turned into strings (`"-inf"`, `"inf"`, `"nan"`) that `as.numeric()`
+#' understands, so that samples and weights simplify to plain vectors.
+#' @noRd
+.read_tppl_lines <- function(json_path) {
+  missing <- json_path[!file.exists(json_path)]
+  if (length(missing) > 0) {
+    cli::cli_abort("Can't find {.file {missing}}.", call = parent.frame())
   }
 
-  # Identify unique topologies
-  trees_ready <- lapply(trees, function(tree) {
-    # normalize edge lengths for the tip reordering
-    tree$edge.length <- tree$edge.length / max(tree$edge.length)
-    # Ladderize to fix edge indices
-    tree_lad <- ladderize_tree(tree)
-    # Order tip labels as similarly as possible
-    tree_ord <- bnpsd::tree_reorder(tree_lad, sort(tree_lad$tip.label))
-    # Remove edge lengths to only focus on topology
-    tree_ord$edge.length <- NULL
-    return(tree_ord)
+  lines <- unlist(lapply(json_path, readLines, warn = FALSE), use.names = FALSE)
+  # drop empty lines; only short lines can be whitespace-only, so only those
+  # are checked with a regular expression (fast on very long lines)
+  lines <- lines[nzchar(lines)]
+  short <- nchar(lines, type = "bytes") < 100
+  blank <- short & !grepl("\\S", lines)
+  lines <- lines[!blank]
+
+  # rewrite {"__float__": ...} only in lines that contain it
+  has_float <- grepl("__float__", lines, fixed = TRUE)
+  lines[has_float] <- gsub(
+    '\\{\\s*"__float__"\\s*:\\s*"([^"]*)"\\s*\\}', '"\\1"',
+    lines[has_float],
+    perl = TRUE
+  )
+  lines
+}
+
+#' Read the samples of one MCMC output file, in either output format
+#'
+#' Default format: one summary line holding all samples. Incremental printing:
+#' one sample per line, then an (empty) summary line, which is dropped.
+#' @noRd
+.read_mcmc_samples <- function(file) {
+  lines <- .read_tppl_lines(file)
+  is_summary <- grepl('^\\s*\\{\\s*"samples"\\s*:', lines)
+  sample_lines <- lines[!is_summary]
+
+  if (length(sample_lines) > 0) {
+    # Parse all sample lines at once by wrapping them in one JSON array
+    return(jsonlite::parse_json(
+      paste0("[", paste(sample_lines, collapse = ","), "]")
+    ))
+  }
+  if (any(is_summary)) {
+    return(jsonlite::parse_json(lines[which(is_summary)[1]])$samples)
+  }
+  NULL
+}
+
+#' Turn parsed samples into a data frame of columns
+#'
+#' `samples` is a list as returned by jsonlite::parse_json(), one element per
+#' sample. Simplifying it here is much faster than letting jsonlite do it.
+#' Each sample is either a number (one parameter), an array of numbers
+#' (several unnamed parameters: x1, x2, ...) or a record whose fields are under
+#' `__data__` (named parameters). Fields that are not single numbers (vectors,
+#' trees) become list-columns.
+#' @noRd
+.samples_to_df <- function(samples) {
+  first <- samples[[1]]
+
+  if (is.list(first) && !is.null(first[["__data__"]])) {
+    fields <- names(first[["__data__"]])
+    cols <- lapply(fields, function(field) {
+      lapply(samples, function(s) s[["__data__"]][[field]])
+    })
+    names(cols) <- fields
+  } else if (is.list(first) && is.null(names(first))) {
+    n_par <- length(first)
+    lengths_ok <- all(lengths(samples) == n_par)
+    flat <- unlist(samples, use.names = FALSE)
+    if (lengths_ok && length(flat) == n_par * length(samples)) {
+      # every sample is an array of n_par scalars: fill a matrix by row
+      mat <- matrix(flat, ncol = n_par, byrow = TRUE)
+      cols <- lapply(seq_len(n_par), function(j) mat[, j])
+    } else {
+      cols <- lapply(seq_len(n_par), function(j) lapply(samples, `[[`, j))
+    }
+    names(cols) <- paste0("x", seq_len(n_par))
+  } else {
+    cols <- list(x1 = samples)
+  }
+
+  cols <- lapply(cols, .simplify_column)
+  structure(cols, class = "data.frame", row.names = c(NA, -length(samples)))
+}
+
+#' Turn a list of single values into a numeric vector; keep anything else
+#'
+#' `"nan"`, `"inf"` and `"-inf"` strings (see .read_tppl_lines()) become
+#' `NaN`, `Inf` and `-Inf`.
+#' @noRd
+.simplify_column <- function(col) {
+  if (!is.list(col)) {
+    return(if (is.character(col)) .as_num(col) else col)
+  }
+  if (all(lengths(col) == 1L) && !any(vapply(col, is.list, logical(1)))) {
+    values <- unlist(col, use.names = FALSE)
+    return(if (is.character(values)) .as_num(values) else values)
+  }
+  col
+}
+
+#' as.numeric() without warnings ("nan", "-inf" become NaN, -Inf)
+#' @noRd
+.as_num <- function(x) {
+  suppressWarnings(as.numeric(x))
+}
+
+#' Bind lists of equal-named columns into one tibble
+#'
+#' Faster than rbind() on many data frames: each column is combined once.
+#' @noRd
+.bind_columns <- function(parts) {
+  cols <- names(parts[[1]])
+  out <- lapply(cols, function(col) {
+    pieces <- lapply(parts, `[[`, col)
+    if (all(vapply(pieces, is.atomic, logical(1)))) {
+      unlist(pieces, use.names = FALSE)
+    } else {
+      do.call(c, lapply(pieces, as.list))
+    }
+  })
+  names(out) <- cols
+  tibble::as_tibble(out)
+}
+
+#' Check the `samples` and `random` arguments of tp_summarise_trees()
+#' @noRd
+.check_summary_args <- function(samples, random, call = parent.frame()) {
+  is_count <- is.numeric(samples) && length(samples) == 1 &&
+    isTRUE(samples >= 1 && samples == round(samples))
+  if (!is_count) {
+    cli::cli_abort(
+      "{.arg samples} must be a single positive whole number.", call = call
+    )
+  }
+  if (!isTRUE(random) && !isFALSE(random)) {
+    cli::cli_abort(
+      "{.arg random} must be {.code TRUE} or {.code FALSE}.", call = call
+    )
+  }
+}
+
+#' Tip labels for the trees: `tip_labels`, or "1", "2", ... (the tip index)
+#' @noRd
+.tip_labels <- function(parts, tip_labels, call = parent.frame()) {
+  n_tips <- unique(vapply(parts, `[[`, integer(1), "n_tips"))
+  if (length(n_tips) != 1) {
+    cli::cli_abort(
+      "The sampled trees don't all have the same number of tips.", call = call
+    )
+  }
+  if (is.null(tip_labels)) {
+    return(as.character(seq_len(n_tips)))
+  }
+  if (length(tip_labels) != n_tips) {
+    cli::cli_abort(c(
+      "{.arg tip_labels} must have one name per tip.",
+      "x" = paste(
+        "The trees have {n_tips} tips;",
+        "{.arg tip_labels} has {length(tip_labels)}."
+      )
+    ), call = call)
+  }
+  as.character(tip_labels)
+}
+
+#' Score every sampled tree and rank the distinct topologies
+#'
+#' MAP score: posterior probability of the tree's topology. MCC score: product
+#' of the posterior probabilities of the tree's clades.
+#'
+#' @return A list with `score` (one per tree), `topology` (one key per tree)
+#'   and `ranked` (one tree per distinct topology, best first; ties broken by
+#'   the topology's posterior probability).
+#' @noRd
+.score_trees <- function(parts, weight, method) {
+  clade_keys <- lapply(parts, `[[`, "clades")
+  clade_tree <- rep(seq_along(parts), lengths(clade_keys))
+  clade_prob <- tapply(
+    weight[clade_tree], unlist(clade_keys, use.names = FALSE), sum
+  )
+
+  topology <- vapply(parts, `[[`, character(1), "topology")
+  topo_prob <- tapply(weight, topology, sum)
+
+  score <- if (method == "MAP") {
+    unname(topo_prob[topology])
+  } else {
+    vapply(clade_keys, function(k) prod(clade_prob[k]), numeric(1))
+  }
+
+  ranked <- which(!duplicated(topology))
+  ranked <- ranked[order(-score[ranked], -topo_prob[topology[ranked]])]
+
+  list(score = score, topology = topology, ranked = ranked)
+}
+
+#' The `samples` distinct topologies ranked right below the summary tree
+#'
+#' `ranked[1]` is the summary tree itself, so it is skipped.
+#' @noRd
+.top_topologies <- function(ranked, samples) {
+  below <- ranked[-1]
+  if (samples > length(below)) {
+    n <- length(below)
+    cli::cli_inform(c(
+      "i" = "Only {n} other distinct topolog{?y/ies} sampled; returning all of them."
+    ))
+  }
+  utils::head(below, samples)
+}
+
+#' Read the sampled trees and their log weights from TreePPL output
+#'
+#' Fields holding arrays inside the trees (likelihood messages `msg`,
+#' sequences `seq`, ...) are removed from the text before parsing: they make
+#' up nearly all of the file but are not needed to rebuild the trees.
+#'
+#' @return A list with `trees` (one parsed tree per sample) and `log_weight`.
+#' @noRd
+.read_tree_samples <- function(trees) {
+  lines <- .read_tppl_lines(trees)
+  lines <- .strip_tree_arrays(lines)
+
+  is_summary <- grepl('^\\s*\\{\\s*"samples"\\s*:', lines)
+  out_trees <- list()
+  out_lw <- numeric(0)
+
+  # Default format (SMC, IS, MCMC): one line per sweep with samples + weights
+  for (line in lines[is_summary]) {
+    sweep <- jsonlite::parse_json(line)
+    if (length(sweep$samples) == 0) next
+    norm_const <- .as_num(sweep$normConst)
+    if (length(norm_const) != 1 || identical(norm_const, -Inf)) next
+    lw <- .as_num(unlist(sweep$weights, use.names = FALSE))
+    # MCMC writes a NaN normalising constant: the weights alone count
+    if (is.finite(norm_const)) lw <- lw + norm_const
+    out_trees <- c(out_trees, sweep$samples)
+    out_lw <- c(out_lw, lw)
+  }
+
+  # Incremental printing (MCMC): one tree per line, all with equal weight
+  if (any(!is_summary)) {
+    inc <- jsonlite::parse_json(
+      paste0("[", paste(lines[!is_summary], collapse = ","), "]")
+    )
+    out_trees <- c(out_trees, inc)
+    out_lw <- c(out_lw, rep(0, length(inc)))
+  }
+
+  keep <- is.finite(out_lw)
+  if (!any(keep)) {
+    cli::cli_abort(c(
+      "No trees with a non-zero weight found in {.file {trees}}.",
+      "i" = "Try more particles or iterations."
+    ), call = parent.frame())
+  }
+
+  # A model may return an array of trees (e.g. MsgTree[]): use its one tree
+  out_trees <- lapply(out_trees[keep], function(s) {
+    if (is.null(s[["__constructor__"]]) && is.null(names(s))) s[[1]] else s
   })
 
-  # This compresses the list into unique tree topologies
-  unique_topologies <- ape::unique.multiPhylo(trees_ready, use.edge.length = FALSE)
+  list(trees = out_trees, log_weight = out_lw[keep])
+}
 
-  # Map every original tree to a unique topology index
-  # match_indices <- match(trees_ready, unique_topologies)
-  match_indices <- attr(unique_topologies, "old.index")
+#' Remove array-valued fields (except samples and weights) from JSON lines
+#'
+#' A recursive regular expression matches a whole bracketed array, however
+#' deeply nested. The field is removed together with one neighbouring comma,
+#' so the JSON stays valid.
+#' @noRd
+.strip_tree_arrays <- function(lines) {
+  key <- '"(?!samples"|weights")[^"]+"\\s*:\\s*'
+  arr <- "(\\[(?:[^\\[\\]]++|(?-1))*\\])"
+  lines <- gsub(paste0(",\\s*", key, arr), "", lines, perl = TRUE)
+  gsub(paste0(key, arr, "\\s*,?"), "", lines, perl = TRUE)
+}
 
-  # Sum weights for each unique topology
-  # tapply splits the weights by the index and sums them
-  topology_probs <- tapply(weights, match_indices, sum)
+#' Take a parsed TreePPL tree apart
+#'
+#' Walks the tree once (each node after its children) and records, with ape's
+#' numbering (tips = their `index`, internal nodes from n_tips + 1, root
+#' first):
+#' * `edge`, `age`: the edge matrix and the age of every node;
+#' * `clades`: for each internal node, its tips as a sorted string key;
+#' * `topology`: all clade keys combined, identical for identical topologies.
+#' @noRd
+.tppl_tree_parts <- function(tree) {
+  parent <- integer(0)
+  child <- integer(0)
+  node_age <- numeric(0)
+  tip_age <- numeric(0)
+  clade <- character(0)
+  n_internal <- 0L
 
-  # Identify the Best Topology
-  best_index <- as.numeric(names(which.max(topology_probs)))
+  # Returns the tips below `node`; internal ids are temporary (negative)
+  walk <- function(node, parent_id) {
+    data <- node[["__data__"]]
 
-  # Calculate posterior probability of this MAP topology
-  map_prob <- max(topology_probs) / sum(topology_probs)
+    if (is.null(data$left)) {
+      if (is.null(data$index)) {
+        cli::cli_abort(c(
+          "Can't identify the tips: these trees' leaves have no {.field index}.",
+          "i" = paste(
+            "Use a model whose leaves keep their row in the alignment,",
+            "e.g. {.val tree_inference_pruning}."
+          )
+        ), call = NULL)
+      }
+      tip <- as.integer(data$index)
+      tip_age[tip] <<- data$age
+      if (!is.na(parent_id)) {
+        parent <<- c(parent, parent_id)
+        child <<- c(child, tip)
+      }
+      return(tip)
+    }
 
-  # Compute Mean Branch Lengths for the MAP Topology
-  # We take all samples that matched the MAP topology...
-  matching_indices <- which(match_indices == best_index)
-  matching_trees <- trees[matching_indices]
-  matching_weights <- weights[matching_indices]
+    n_internal <<- n_internal + 1L
+    k <- n_internal # this node's number; n_internal grows in the recursion
+    id <- -k
+    node_age[k] <<- data$age
+    if (!is.na(parent_id)) {
+      parent <<- c(parent, parent_id)
+      child <<- c(child, id)
+    }
 
-  # ...and compute a consensus to average their branch lengths.
-  # Ideally, we should do a weighted average of the lengths,
-  # but ape::consensus uses simple mean. For most purposes, this is sufficient.
-  final_map <- map <- phangorn::allCompat(matching_trees, rooted = TRUE) |>
-    phangorn::add_edge_length(matching_trees,
-      fun = function(x) stats::weighted.mean(x, matching_weights)
-    )
+    tips <- c(walk(data$left, id), walk(data$right, id))
+    clade[k] <<- paste(sort(tips), collapse = " ")
+    tips
+  }
 
-  print(paste("MAP Topology found"))
-  print(paste("Posterior Probability:", round(map_prob, 4)))
-  print(paste(
-    "Based on the topology of", length(matching_indices),
-    "samples out of", length(trees)
-  ))
+  walk(tree, NA_integer_)
 
-  return(final_map)
+  n_tips <- length(tip_age)
+  # internal node k (1 = root) becomes ape node n_tips + k
+  to_ape <- function(x) ifelse(x < 0, n_tips - x, x)
+  edge <- cbind(to_ape(parent), to_ape(child))
+
+  list(
+    n_tips = n_tips,
+    edge = edge,
+    age = c(tip_age, node_age),
+    clades = clade,
+    topology = paste(sort(clade), collapse = "|")
+  )
+}
+
+#' Build an ape::phylo tree from tree parts, using their own node ages
+#' @noRd
+.parts_to_phylo <- function(parts, labels, age = parts$age) {
+  edge <- parts$edge
+  storage.mode(edge) <- "integer"
+  structure(
+    list(
+      edge = edge,
+      edge.length = age[edge[, 1]] - age[edge[, 2]],
+      tip.label = labels,
+      Nnode = length(parts$clades)
+    ),
+    class = "phylo",
+    order = "cladewise"
+  )
+}
+
+#' Build the summary tree for the topology of tree `i`
+#'
+#' Node ages are the weighted mean age of each clade over the trees in
+#' `in_set`; tip ages are averaged the same way.
+#' @noRd
+.summary_phylo <- function(parts, i, in_set, weight, labels) {
+  target <- parts[[i]]
+  n_tips <- target$n_tips
+  set <- which(in_set & weight > 0)
+  if (length(set) == 0) set <- which(in_set)
+
+  # weighted mean age of every clade over the trees in the set
+  keys <- unlist(lapply(parts[set], `[[`, "clades"), use.names = FALSE)
+  ages <- unlist(
+    lapply(parts[set], function(p) p$age[(p$n_tips + 1):length(p$age)]),
+    use.names = FALSE
+  )
+  w <- rep(weight[set], lengths(lapply(parts[set], `[[`, "clades")))
+  mean_age <- tapply(w * ages, keys, sum) / tapply(w, keys, sum)
+
+  tip_ages <- vapply(
+    parts[set], function(p) p$age[seq_len(n_tips)], numeric(n_tips)
+  )
+  tip_ages <- if (is.matrix(tip_ages)) {
+    drop(tip_ages %*% weight[set]) / sum(weight[set])
+  } else {
+    tip_ages
+  }
+
+  age <- c(tip_ages, unname(mean_age[target$clades]))
+  .parts_to_phylo(target, labels, age)
 }

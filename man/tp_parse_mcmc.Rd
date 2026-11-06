@@ -4,23 +4,18 @@
 \alias{tp_parse_mcmc}
 \title{Parse the output of a TreePPL MCMC run}
 \usage{
-tp_parse_mcmc(json_path, wide = TRUE)
+tp_parse_mcmc(json_path)
 }
 \arguments{
 \item{json_path}{Path(s) to one or more JSON output files, as returned by
 \code{\link[=tp_run]{tp_run()}}. Each file is one run.}
-
-\item{wide}{Logical. If \code{TRUE} (default), one row per iteration and one
-column per parameter. If \code{FALSE}, one row per iteration and parameter,
-with columns \code{parameter} and \code{sample}.}
 }
 \value{
-A tibble (tidy data frame) with columns:
+A tibble (tidy data frame) with one row per iteration and columns:
 \itemize{
 \item \code{run}: run number, in the order of \code{json_path}.
 \item \code{iteration}: iteration number within its run.
-\item one column per parameter (\code{wide = TRUE}), or \code{parameter} and \code{sample}
-(\code{wide = FALSE}).
+\item one column per parameter.
 }
 }
 \description{
@@ -45,26 +40,18 @@ are not returned.
 
 Parameters are named after the fields of the model's return type when the
 output has them (e.g. \code{lambda}, \code{mu}), and \code{x1}, \code{x2}, ... otherwise.
-Non-scalar values (vectors, trees) are kept as list-columns.
+Non-scalar values (vectors, trees) are kept as list-columns; for trees, use
+\code{\link[=tp_summarise_trees]{tp_summarise_trees()}}.
 
 Files without samples are skipped with a warning. If no file has samples,
 the function stops with an error.
 }
 \examples{
 \dontrun{
-sampler <- tp_sampler(model = "crbd", method = "mcmc")
-run <- tp_run(sampler, data, iterations = 1000, n_runs = 2)
-
-# Parse output files directly
 samples <- tp_parse_mcmc(c("out1.json", "out2.json"))
-samples_long <- tp_parse_mcmc("out1.json", wide = FALSE)
-
-# Incremental printing gives the same result
-sampler <- tp_sampler(model = "crbd", method = "mcmc", incremental_printing = TRUE)
-run <- tp_run(sampler, data, iterations = 1000)
 }
 }
 \seealso{
 \code{\link[=tp_run]{tp_run()}}, which calls this function for MCMC runs, and
-\code{\link[=tp_parse_smc]{tp_parse_smc()}} for SMC output.
+\code{\link[=tp_parse_smc]{tp_parse_smc()}} for SMC and IS output.
 }

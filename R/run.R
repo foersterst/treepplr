@@ -92,6 +92,7 @@ tp_run <- function(
   )
 
   model <- sampler$model
+  model_path <- sampler$model_path
   method <- sampler$method
 
   if (verbose) {
@@ -104,7 +105,7 @@ tp_run <- function(
     )
   }
 
-  .parse_output(output_paths, model = model, method = method, dir = dir)
+  .parse_output(output_paths, model = model_path, method = method, dir = dir)
 }
 
 

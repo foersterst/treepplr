@@ -91,8 +91,10 @@ plot(res$tree)
 res$tree_score
 
 # The 5 most probable topologies after the MAP topology
-top <- tp_summarise_trees("out.json", method = "MAP", samples = 5,
-                          random = FALSE, tip_labels = names(aln))
+top <- tp_summarise_trees("out.json",
+  method = "MAP", samples = 5,
+  random = FALSE, tip_labels = names(aln)
+)
 top$sample_scores
 }
 }

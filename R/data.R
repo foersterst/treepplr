@@ -579,23 +579,22 @@ tp_input_check <- function(json, tppl) {
 }
 
 #' Return the text between a bracket at position `open_at` and its partner
+#'
+#' `open` and `close` set the bracket pair: `(` `)` by default, `{` `}` for
+#' a function body.
 #' @noRd
-.extract_balanced <- function(code, open_at) {
+.extract_balanced <- function(code, open_at, open = "(", close = ")") {
   chars <- strsplit(substring(code, open_at), "")[[1]]
-  depth <- 0
+  depth <- cumsum(chars == open) - cumsum(chars == close)
+  end <- which(depth == 0)[1]
 
-  for (i in seq_along(chars)) {
-    if (chars[i] == "(") depth <- depth + 1
-    if (chars[i] == ")") depth <- depth - 1
-    if (depth == 0) {
-      if (i <= 2) {
-        return("") # "()" -> a model without arguments
-      }
-      return(paste(chars[2:(i - 1)], collapse = ""))
-    }
+  if (is.na(end)) {
+    cli::cli_abort("No closing {.code {close}} found in the model code.")
   }
-
-  cli::cli_abort("The model signature has no closing {.code )}.")
+  if (end <= 2) {
+    return("") # "()" -> a model without arguments
+  }
+  paste(chars[2:(end - 1)], collapse = "")
 }
 
 #' Split a string at `sep`, ignoring separators inside (), [] or {}

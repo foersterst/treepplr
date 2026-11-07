@@ -26,12 +26,19 @@
 #' over all particles of all sweeps, so the heaviest particle gets weight 1.
 #'
 #' Parameters are named after the fields of the model's return type when the
-#' output has them (e.g. `lambda`, `mu`), and `x1`, `x2`, ... otherwise.
+#' output has them (e.g. `lambda`, `mu`). Otherwise, if `model` is given, they
+#' are named after the values in the model's `return` statement: for
+#' `return [lambda, mu, int2real(m)];` the columns are `lambda`, `mu` and `m`.
+#' Without `model`, or when the names can't be worked out, they are `x1`,
+#' `x2`, ...
 #' Non-scalar values (vectors, trees) are kept as list-columns; for trees, use
 #' [tp_summarise_trees()].
 #'
 #' @param json_path Path(s) to one or more JSON output files, as returned by
 #'   [tp_run()]. Sweeps are numbered consecutively across files.
+#' @param model Optional: the model that produced the output, as a model name
+#'   from [tp_model_library()] (e.g. `"clads2"`) or the path to its `.tppl`
+#'   file. Used to name the parameter columns (see Details).
 #'
 #' @return A tibble (tidy data frame) with one row per particle and columns:
 #'   * `sweep`: sweep number.
@@ -48,9 +55,9 @@
 #'
 #' @examples
 #' \dontrun{
-#' samples <- tp_parse_smc("out.json")
+#' samples <- tp_parse_smc("out.json", model = "clads2")
 #' }
-tp_parse_smc <- function(json_path) {
+tp_parse_smc <- function(json_path, model = NULL) {
   lines <- .read_tppl_lines(json_path)
 
   sweeps <- lapply(seq_along(lines), function(i) {
@@ -59,7 +66,7 @@ tp_parse_smc <- function(json_path) {
 
     # Skip sweeps with no samples or a NaN / -Inf normalising constant
     if (length(sweep$samples) == 0 || length(norm_const) != 1 ||
-      !is.finite(norm_const)) {
+        !is.finite(norm_const)) {
       return(NULL)
     }
 
@@ -102,7 +109,8 @@ tp_parse_smc <- function(json_path) {
   df$norm_weight <- exp(total - max(total))
 
   id_cols <- c("sweep", "particle", "log_weight", "norm_constant", "norm_weight")
-  df[c(id_cols, setdiff(names(df), id_cols))]
+  df <- df[c(id_cols, setdiff(names(df), id_cols))]
+  .name_parameters(df, model)
 }
 
 #' Parse the output of a TreePPL MCMC run
@@ -126,7 +134,11 @@ tp_parse_smc <- function(json_path) {
 #' are not returned.
 #'
 #' Parameters are named after the fields of the model's return type when the
-#' output has them (e.g. `lambda`, `mu`), and `x1`, `x2`, ... otherwise.
+#' output has them (e.g. `lambda`, `mu`). Otherwise, if `model` is given, they
+#' are named after the values in the model's `return` statement: for
+#' `return [lambda, mu, int2real(m)];` the columns are `lambda`, `mu` and `m`.
+#' Without `model`, or when the names can't be worked out, they are `x1`,
+#' `x2`, ...
 #' Non-scalar values (vectors, trees) are kept as list-columns; for trees, use
 #' [tp_summarise_trees()].
 #'
@@ -135,6 +147,9 @@ tp_parse_smc <- function(json_path) {
 #'
 #' @param json_path Path(s) to one or more JSON output files, as returned by
 #'   [tp_run()]. Each file is one run.
+#' @param model Optional: the model that produced the output, as a model name
+#'   from [tp_model_library()] (e.g. `"clads2"`) or the path to its `.tppl`
+#'   file. Used to name the parameter columns (see Details).
 #'
 #' @return A tibble (tidy data frame) with one row per iteration and columns:
 #'   * `run`: run number, in the order of `json_path`.
@@ -148,9 +163,9 @@ tp_parse_smc <- function(json_path) {
 #'
 #' @examples
 #' \dontrun{
-#' samples <- tp_parse_mcmc(c("out1.json", "out2.json"))
+#' samples <- tp_parse_mcmc(c("out1.json", "out2.json"), model = "clads2")
 #' }
-tp_parse_mcmc <- function(json_path) {
+tp_parse_mcmc <- function(json_path, model = NULL) {
   runs <- lapply(seq_along(json_path), function(run_id) {
     samples <- .read_mcmc_samples(json_path[run_id])
 
@@ -176,7 +191,7 @@ tp_parse_mcmc <- function(json_path) {
     cli::cli_abort("No run returned any samples.")
   }
 
-  .bind_columns(runs)
+  .name_parameters(.bind_columns(runs), model)
 }
 
 #' Summarise the trees sampled in a TreePPL run
@@ -262,11 +277,11 @@ tp_parse_mcmc <- function(json_path) {
 #' top$sample_scores
 #' }
 tp_summarise_trees <- function(
-  trees,
-  method = c("MAP", "MCC"),
-  samples = 1,
-  random = TRUE,
-  tip_labels = NULL
+    trees,
+    method = c("MAP", "MCC"),
+    samples = 1,
+    random = TRUE,
+    tip_labels = NULL
 ) {
   method <- match.arg(method)
   .check_summary_args(samples, random)
@@ -318,6 +333,207 @@ tp_summarise_trees <- function(
 }
 
 # Helper Functions ------------------------------------------------------------------
+
+#' Rename the x1, x2, ... columns after the values the model returns
+#'
+#' Only unnamed parameter columns (`x1`, `x2`, ...) are renamed, and only when
+#' the model's `return` statement gives exactly one name per column; otherwise
+#' the columns are kept as they are, with a message saying why.
+#' @noRd
+.name_parameters <- function(df, model) {
+  if (is.null(model)) {
+    return(df)
+  }
+
+  x_cols <- grep("^x[0-9]+$", names(df), value = TRUE)
+  if (length(x_cols) == 0) {
+    return(df) # parameters are already named (records)
+  }
+
+  tppl <- .model_path(model)
+  if (is.null(tppl)) {
+    cli::cli_inform(c(
+      "i" = "Can't find model {.val {model}}; keeping columns {.field {x_cols}}."
+    ))
+    return(df)
+  }
+
+  par_names <- .model_return_names(tppl)
+  if (is.null(par_names) || length(par_names) != length(x_cols)) {
+    cli::cli_inform(c(
+      "i" = paste(
+        "Can't name the parameters from the {.code return} statement of",
+        "{.file {tppl}}; keeping columns {.field {x_cols}}."
+      )
+    ))
+    return(df)
+  }
+
+  names(df)[match(x_cols, names(df))] <- par_names
+  df
+}
+
+#' Path to a model's .tppl file, from a path or a model-library name
+#' @noRd
+.model_path <- function(model) {
+  if (is.character(model) && length(model) == 1 && file.exists(model)) {
+    return(model)
+  }
+  path <- tryCatch(
+    .find(type = "model", model_name = model),
+    error = function(e) character(0)
+  )
+  if (length(path) == 0) NULL else path[[1]]
+}
+
+#' Names of the values a TreePPL model returns
+#'
+#' Reads the `return` statement of the `model function` in a `.tppl` file and
+#' turns each returned value into a name:
+#' * `return [lambda, mu, int2real(m)];` gives `lambda`, `mu`, `m`;
+#' * `return p;` or `return(p);` gives `p`;
+#' * a field access such as `gdist.alpha` is kept as `gdist.alpha`;
+#' * a function call with one plain argument, such as `int2real(m)`, is
+#'   named after its argument; any other expression gets `x<i>`.
+#'
+#' `return` statements inside functions defined in the model body are
+#' ignored. Records (`return ReturnType { ... }`) return `NULL`: their output
+#' already carries field names.
+#'
+#' @return A character vector of names, or `NULL` when the names can't be
+#'   worked out (no return found, records, or different `return` statements
+#'   that don't agree).
+#' @noRd
+.model_return_names <- function(tppl) {
+  code <- .read_tppl_code(tppl)
+  body <- .model_body(code)
+  if (is.null(body)) {
+    return(NULL)
+  }
+
+  exprs <- .return_expressions(.drop_inner_functions(body))
+  if (length(exprs) == 0) {
+    return(NULL)
+  }
+
+  name_sets <- lapply(exprs, .names_from_return)
+  if (any(vapply(name_sets, is.null, logical(1)))) {
+    return(NULL)
+  }
+  if (length(unique(name_sets)) > 1) {
+    return(NULL) # several returns that name their values differently
+  }
+
+  make.unique(name_sets[[1]], sep = "_")
+}
+
+#' Text of the `model function` body, between its `{` and matching `}`
+#' @noRd
+.model_body <- function(code) {
+  pattern <- "model\\s+function\\s+[A-Za-z_][A-Za-z0-9_]*\\s*\\("
+  start <- regexpr(pattern, code, perl = TRUE)
+  if (start == -1) {
+    return(NULL)
+  }
+
+  # skip the argument list, then take the first block after it
+  open_args <- start + attr(start, "match.length") - 1
+  args <- .extract_balanced(code, open_args)
+  after_args <- open_args + nchar(args) + 2
+  open_body <- regexpr("{", substring(code, after_args), fixed = TRUE)
+  if (open_body == -1) {
+    return(NULL)
+  }
+  .extract_balanced(code, after_args + open_body - 1, open = "{", close = "}")
+}
+
+#' Remove the bodies of functions defined inside a model body
+#'
+#' Anonymous functions (`function(x: Int) => Real { ... }`) have their own
+#' `return` statements, which are not the model's return value.
+#' @noRd
+.drop_inner_functions <- function(body) {
+  repeat {
+    at <- regexpr("\\bfunction\\s*\\(", body, perl = TRUE)
+    if (at == -1) {
+      return(body)
+    }
+    open <- regexpr("{", substring(body, at), fixed = TRUE)
+    if (open == -1) {
+      return(body)
+    }
+    open <- at + open - 1
+    inner <- .extract_balanced(body, open, open = "{", close = "}")
+    body <- paste0(
+      substr(body, 1, at - 1), "NULL",
+      substring(body, open + nchar(inner) + 2)
+    )
+  }
+}
+
+#' The expressions of all `return` statements in a (function-free) body
+#' @noRd
+.return_expressions <- function(body) {
+  hits <- gregexpr("\\breturn\\b", body, perl = TRUE)[[1]]
+  if (hits[1] == -1) {
+    return(character(0))
+  }
+  vapply(hits, function(at) {
+    rest <- strsplit(substring(body, at + 6), "")[[1]]
+    # the expression runs to the first ";" outside brackets
+    depth <- cumsum(rest %in% c("(", "[", "{")) -
+      cumsum(rest %in% c(")", "]", "}"))
+    end <- which(rest == ";" & depth == 0)[1]
+    if (is.na(end)) end <- length(rest) + 1
+    trimws(paste(rest[seq_len(end - 1)], collapse = ""))
+  }, character(1))
+}
+
+#' Names for the values of one return expression, or NULL
+#' @noRd
+.names_from_return <- function(expr) {
+  expr <- trimws(expr)
+
+  # strip redundant outer parentheses: return(p) -> p
+  while (startsWith(expr, "(") && endsWith(expr, ")") &&
+         nchar(.extract_balanced(expr, 1)) == nchar(expr) - 2) {
+    expr <- trimws(substr(expr, 2, nchar(expr) - 1))
+  }
+
+  # a record such as ReturnType { ... }: its output is already named
+  if (grepl("^[A-Za-z_][A-Za-z0-9_]*\\s*\\{", expr)) {
+    return(NULL)
+  }
+
+  items <- if (startsWith(expr, "[") && endsWith(expr, "]")) {
+    .split_top_level(substr(expr, 2, nchar(expr) - 1), sep = ",")
+  } else {
+    expr
+  }
+  items <- items[items != ""]
+  if (length(items) == 0) {
+    return(NULL)
+  }
+
+  vapply(seq_along(items), function(i) .value_name(items[i], i), character(1))
+}
+
+#' A name for one returned value: the variable, the argument of a one-argument
+#' call, or `x<i>` for anything else
+#' @noRd
+.value_name <- function(item, i) {
+  ident <- "[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*"
+  item <- trimws(item)
+
+  if (grepl(paste0("^", ident, "$"), item, perl = TRUE)) {
+    return(item)
+  }
+  call <- paste0("^[A-Za-z_][A-Za-z0-9_]*\\s*\\(\\s*(", ident, ")\\s*\\)$")
+  if (grepl(call, item, perl = TRUE)) {
+    return(sub(call, "\\1", item, perl = TRUE))
+  }
+  paste0("x", i)
+}
 
 #' Read the non-empty lines of TreePPL output files
 #'

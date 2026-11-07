@@ -226,15 +226,15 @@ tp_run <- function(
 
   if (!category %in% .no_parser_categories) {
     if (startsWith(method, "smc")) {
-      return(tp_parse_smc(files))
+      return(tp_parse_smc(files, model = model))
     }
 
     if (startsWith(method, "is")) {
-      return(tp_parse_smc(files))
+      return(tp_parse_smc(files, model = model))
     }
 
     if (startsWith(method, "mcmc")) {
-      return(tp_parse_mcmc(files))
+      return(tp_parse_mcmc(files, model = model))
     }
   }
 

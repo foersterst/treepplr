@@ -4,11 +4,15 @@
 \alias{tp_parse_smc}
 \title{Parse the output of a TreePPL SMC or IS run}
 \usage{
-tp_parse_smc(json_path)
+tp_parse_smc(json_path, model = NULL)
 }
 \arguments{
 \item{json_path}{Path(s) to one or more JSON output files, as returned by
 \code{\link[=tp_run]{tp_run()}}. Sweeps are numbered consecutively across files.}
+
+\item{model}{Optional: the model that produced the output, as a model name
+from \code{\link[=tp_model_library]{tp_model_library()}} (e.g. \code{"clads2"}) or the path to its \code{.tppl}
+file. Used to name the parameter columns (see Details).}
 }
 \value{
 A tibble (tidy data frame) with one row per particle and columns:
@@ -45,13 +49,17 @@ The normalised weight of a particle is
 over all particles of all sweeps, so the heaviest particle gets weight 1.
 
 Parameters are named after the fields of the model's return type when the
-output has them (e.g. \code{lambda}, \code{mu}), and \code{x1}, \code{x2}, ... otherwise.
+output has them (e.g. \code{lambda}, \code{mu}). Otherwise, if \code{model} is given, they
+are named after the values in the model's \code{return} statement: for
+\code{return [lambda, mu, int2real(m)];} the columns are \code{lambda}, \code{mu} and \code{m}.
+Without \code{model}, or when the names can't be worked out, they are \code{x1},
+\code{x2}, ...
 Non-scalar values (vectors, trees) are kept as list-columns; for trees, use
 \code{\link[=tp_summarise_trees]{tp_summarise_trees()}}.
 }
 \examples{
 \dontrun{
-samples <- tp_parse_smc("out.json")
+samples <- tp_parse_smc("out.json", model = "clads2")
 }
 }
 \seealso{

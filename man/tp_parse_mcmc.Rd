@@ -4,11 +4,15 @@
 \alias{tp_parse_mcmc}
 \title{Parse the output of a TreePPL MCMC run}
 \usage{
-tp_parse_mcmc(json_path)
+tp_parse_mcmc(json_path, model = NULL)
 }
 \arguments{
 \item{json_path}{Path(s) to one or more JSON output files, as returned by
 \code{\link[=tp_run]{tp_run()}}. Each file is one run.}
+
+\item{model}{Optional: the model that produced the output, as a model name
+from \code{\link[=tp_model_library]{tp_model_library()}} (e.g. \code{"clads2"}) or the path to its \code{.tppl}
+file. Used to name the parameter columns (see Details).}
 }
 \value{
 A tibble (tidy data frame) with one row per iteration and columns:
@@ -39,7 +43,11 @@ read as R's \code{NaN}, \code{Inf} and \code{-Inf}. MCMC weights are all equal, 
 are not returned.
 
 Parameters are named after the fields of the model's return type when the
-output has them (e.g. \code{lambda}, \code{mu}), and \code{x1}, \code{x2}, ... otherwise.
+output has them (e.g. \code{lambda}, \code{mu}). Otherwise, if \code{model} is given, they
+are named after the values in the model's \code{return} statement: for
+\code{return [lambda, mu, int2real(m)];} the columns are \code{lambda}, \code{mu} and \code{m}.
+Without \code{model}, or when the names can't be worked out, they are \code{x1},
+\code{x2}, ...
 Non-scalar values (vectors, trees) are kept as list-columns; for trees, use
 \code{\link[=tp_summarise_trees]{tp_summarise_trees()}}.
 
@@ -48,7 +56,7 @@ the function stops with an error.
 }
 \examples{
 \dontrun{
-samples <- tp_parse_mcmc(c("out1.json", "out2.json"))
+samples <- tp_parse_mcmc(c("out1.json", "out2.json"), model = "clads2")
 }
 }
 \seealso{

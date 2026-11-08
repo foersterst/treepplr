@@ -332,6 +332,113 @@ tp_summarise_trees <- function(
   out
 }
 
+#' Parse the output of a TreePPL host-repertoire run
+#'
+#' @description
+#' `tp_parse_hrm()` reads the JSON output of a host-repertoire model (e.g.
+#' `"flat-root-prior-HRM"`, `"subroot-HRM"`) and splits each sample into its
+#' model parameters, the host repertoire at every node of the symbiont tree,
+#' and the host gains and losses along every branch.
+#'
+#' @details
+#' Each sample of a host-repertoire run holds the model parameters and the
+#' symbiont tree with a sampled history: the repertoire (one state per host)
+#' at each node, and the events that changed it along the branch above.
+#' Host states are `0` (non-host), `1` (potential host) and `2` (actual
+#' host); in the two-state version of the model only `0` and `2`, or `0` and
+#' `1`, occur.
+#'
+#' The relative transition rates (`lambda`) are named after the transition
+#' they stand for, `lambda_<from><to>`: with three states `lambda_01`,
+#' `lambda_10`, `lambda_12` and `lambda_21`; with two states `lambda_01` and
+#' `lambda_10` (or `lambda_02` and `lambda_20` when the states are `0` and
+#' `2`).
+#'
+#' The three tables are linked by `sample`, the row number in `parameters`.
+#' Nodes are identified by their `label` in the input tree (tips `1, 2, ...`
+#' in the order of the rows of `interactions`), which is also how they are
+#' labelled in `tree`. Hosts are numbered in the order of the columns of
+#' `interactions`.
+#'
+#' Sweeps, particles and weights are handled as in [tp_parse_smc()] (SMC and
+#' IS) and [tp_parse_mcmc()] (MCMC), including skipped sweeps and particles
+#' with zero weight.
+#'
+#' @param json_path Path(s) to one or more JSON output files, as returned by
+#'   [tp_run()].
+#' @param method Inference method of the run: `"smc"`, `"is"` or `"mcmc"`.
+#'
+#' @return A list with elements:
+#'   * `parameters`: a tibble with one row per sample: `sample`, then
+#'     `sweep`, `particle`, `log_weight`, `norm_constant` and `norm_weight`
+#'     (SMC and IS) or `run` and `iteration` (MCMC), then the `lambda_*` rates,
+#'     `mu` and `beta`.
+#'   * `node_repertoires`: a tibble with one row per sample, node and host:
+#'     `sample`, `node`, `host`, `state`.
+#'   * `events`: a tibble with one row per event: `sample`, `node` (the node
+#'     at the end of the branch where it happened), `host`, `from_state`,
+#'     `to_state` and `time` (the event's age, in the units of the tree).
+#'   * `tree`: the symbiont tree as an `ape::phylo` object, with the input
+#'     labels as tip and node labels.
+#'
+#' @seealso [tp_parse_smc()] and [tp_parse_mcmc()] for other models.
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' hrm <- tp_parse_hrm("out.json", method = "smc")
+#' hrm$parameters
+#'
+#' # Posterior probability that each host is an actual host at each node
+#' w <- hrm$parameters$norm_weight / sum(hrm$parameters$norm_weight)
+#' reps <- hrm$node_repertoires
+#' reps$w <- w[reps$sample]
+#' aggregate(w ~ node + host, data = reps[reps$state == 2, ], FUN = sum)
+#' }
+tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
+  method <- match.arg(method)
+
+  # Reuse the general parsers: they handle the output formats, weights and
+  # skipped sweeps. Records give named columns: lambda, mu, beta and tree
+  # (lambda and tree as list-columns).
+  params <- if (method == "mcmc") {
+    tp_parse_mcmc(json_path)
+  } else {
+    tp_parse_smc(json_path)
+  }
+  if (!all(c("lambda", "tree") %in% names(params))) {
+    cli::cli_abort(
+      "{.file {json_path}} doesn't look like host-repertoire output."
+    )
+  }
+
+  # Walk every sampled tree once, collecting nodes and events
+  walks <- lapply(params$tree, .hrm_walk)
+  node_repertoires <- .hrm_bind(walks, "nodes")
+  events <- .hrm_bind(walks, "events")
+
+  # Spread lambda into one named column per transition
+  lambda <- do.call(rbind, lapply(params$lambda, unlist))
+  colnames(lambda) <- .lambda_names(ncol(lambda), unique(node_repertoires$state))
+
+  id_cols <- setdiff(names(params), c("lambda", "tree", "mu", "beta"))
+  parameters <- tibble::as_tibble(cbind(
+    sample = seq_len(nrow(params)),
+    as.data.frame(params[id_cols]),
+    as.data.frame(lambda),
+    as.data.frame(params[intersect(c("mu", "beta"), names(params))])
+  ))
+
+  list(
+    parameters = parameters,
+    node_repertoires = node_repertoires,
+    events = events,
+    tree = .hrm_phylo(walks[[1]])
+  )
+}
+
+
 # Helper Functions ------------------------------------------------------------------
 
 #' Rename the x1, x2, ... columns after the values the model returns
@@ -940,4 +1047,135 @@ tp_summarise_trees <- function(
 
   age <- c(tip_ages, unname(mean_age[target$clades]))
   .parts_to_phylo(target, labels, age)
+}
+
+#' Collect the nodes and events of one sampled host-repertoire tree
+#'
+#' Walks the tree from the root, each node before its children. Values are
+#' gathered in plain vectors and lists (no data frames per node), which keeps
+#' the walk fast for large outputs.
+#'
+#' @return A list with, per node, `node` (label), `parent` (label), `age`,
+#'   `is_tip` and `repertoire` (a list of state vectors); and, per event,
+#'   `event` (the event's fields) and `event_node` (the node below the branch).
+#' @noRd
+.hrm_walk <- function(tree) {
+  node <- integer(0)
+  parent <- integer(0)
+  age <- numeric(0)
+  is_tip <- logical(0)
+  repertoire <- list()
+  event <- list()
+  event_node <- integer(0)
+
+  walk <- function(x, parent_label) {
+    data <- x[["__data__"]]
+    label <- as.integer(data$label)
+
+    node <<- c(node, label)
+    parent <<- c(parent, parent_label)
+    age <<- c(age, data$age)
+    is_tip <<- c(is_tip, is.null(data$left))
+    repertoire[[length(repertoire) + 1]] <<- as.integer(unlist(data$repertoire))
+
+    if (length(data$history) > 0) {
+      event <<- c(event, lapply(data$history, `[[`, "__data__"))
+      event_node <<- c(event_node, rep(label, length(data$history)))
+    }
+
+    if (!is.null(data$left)) {
+      walk(data$left, label)
+      walk(data$right, label)
+    }
+  }
+
+  walk(tree, NA_integer_)
+  list(
+    node = node, parent = parent, age = age, is_tip = is_tip,
+    repertoire = repertoire, event = event, event_node = event_node
+  )
+}
+
+#' Bind the nodes or events of all samples into one tibble, with `sample`
+#' @noRd
+.hrm_bind <- function(walks, what) {
+  if (what == "nodes") {
+    reps <- lapply(walks, `[[`, "repertoire")
+    n_hosts <- lapply(reps, lengths)
+    return(tibble::as_tibble(list(
+      sample = rep(seq_along(walks), vapply(n_hosts, sum, numeric(1))),
+      node = unlist(Map(rep, lapply(walks, `[[`, "node"), n_hosts),
+                    use.names = FALSE),
+      host = unlist(lapply(unlist(n_hosts), seq_len), use.names = FALSE),
+      state = unlist(reps, use.names = FALSE)
+    )))
+  }
+
+  event <- unlist(lapply(walks, `[[`, "event"), recursive = FALSE)
+  field <- function(name) {
+    vapply(event, function(e) as.numeric(e[[name]]), numeric(1))
+  }
+  tibble::as_tibble(list(
+    sample = rep(
+      seq_along(walks), vapply(walks, function(w) length(w$event), integer(1))
+    ),
+    node = unlist(lapply(walks, `[[`, "event_node"), use.names = FALSE),
+    host = as.integer(field("host")),
+    from_state = as.integer(field("fromState")),
+    to_state = as.integer(field("toState")),
+    time = field("eventTime")
+  ))
+}
+
+#' Names of the lambda rates, after the transitions they stand for
+#'
+#' Four rates: three states (0, 1, 2). Two rates: two states, `0` and `1`, or
+#' `0` and `2` when that is how the repertoires are coded.
+#' @noRd
+.lambda_names <- function(n_lambda, states) {
+  if (n_lambda == 4) {
+    return(c("lambda_01", "lambda_10", "lambda_12", "lambda_21"))
+  }
+  if (n_lambda == 2) {
+    if (2 %in% states && !1 %in% states) {
+      return(c("lambda_02", "lambda_20"))
+    }
+    return(c("lambda_01", "lambda_10"))
+  }
+  paste0("lambda_", seq_len(n_lambda)) # unknown layout: number them
+}
+
+#' Build the ape::phylo symbiont tree from the walk of one sample
+#'
+#' Tips keep their labels as ape numbers (1 to n_tips); internal nodes are
+#' numbered n_tips + 1, ... in the order walked (root first). The input labels
+#' are kept as tip and node labels.
+#' @noRd
+.hrm_phylo <- function(walk) {
+  label <- walk$node
+  parent <- walk$parent
+  age <- walk$age
+  is_tip <- walk$is_tip
+
+  n_tips <- sum(is_tip)
+  ape_id <- integer(length(label))
+  ape_id[is_tip] <- label[is_tip]
+  ape_id[!is_tip] <- n_tips + seq_len(sum(!is_tip))
+
+  to_ape <- function(x) ape_id[match(x, label)]
+  has_parent <- !is.na(parent)
+  edge <- cbind(to_ape(parent[has_parent]), ape_id[has_parent])
+  age_by_id <- age[order(ape_id)]
+
+  structure(
+    list(
+      edge = edge,
+      edge.length = age_by_id[edge[, 1]] - age_by_id[edge[, 2]],
+      tip.label = as.character(sort(label[is_tip])),
+      Nnode = sum(!is_tip),
+      node.label = as.character(label[!is_tip])
+    ),
+    class = "phylo",
+    order = "cladewise"
+  )
 }

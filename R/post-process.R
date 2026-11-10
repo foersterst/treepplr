@@ -223,7 +223,7 @@ tp_parse_mcmc <- function(json_path, model = NULL) {
 #'
 #' **Node ages.** In a summary tree (and in the trees returned with
 #' `random = FALSE`), each node's age is the weighted mean or median
-#' (`heights`) age of that clade: over the sampled trees with the same
+#' (`heights`) age of that clade over the sampled trees with the same
 #' topology (MAP), or over all sampled trees that contain the clade (MCC).
 #' Branch lengths are differences of ages. Trees returned with
 #' `random = TRUE` keep their own sampled branch lengths.
@@ -231,15 +231,15 @@ tp_parse_mcmc <- function(json_path, model = NULL) {
 #' With `method = "MAP"`, all node ages come from the same trees, so every
 #' parent is at least as old as its children. With `method = "MCC"`, a parent
 #' and its child are averaged over different sets of trees, and a child can
-#' come out older than its parent, giving a negative branch length (as in
-#' BEAST's TreeAnnotator). This is reported with a warning; it is most likely
+#' come out older than its parent, giving a negative branch length.
+#' This is reported with a warning; it is most likely
 #' when the clades involved have low support.
 #'
 #' **Uncertainty.** `node_summary` gives, for each internal node of the
 #' summary tree, the posterior probability of its clade and the weighted mean,
 #' median and 95% highest posterior density (HPD) interval of its age, over
 #' the same trees used for the node ages. The HPD interval is the shortest
-#' interval that holds 95% of the weight, as in BEAST. The clade
+#' interval that holds 95% of the weight. The clade
 #' probabilities are also stored as the node labels of `tree`, so
 #' `plot(res$tree, show.node.label = TRUE)` shows them.
 #'

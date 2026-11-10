@@ -66,7 +66,7 @@ tp_parse_smc <- function(json_path, model = NULL) {
 
     # Skip sweeps with no samples or a NaN / -Inf normalising constant
     if (length(sweep$samples) == 0 || length(norm_const) != 1 ||
-        !is.finite(norm_const)) {
+      !is.finite(norm_const)) {
       return(NULL)
     }
 
@@ -200,8 +200,9 @@ tp_parse_mcmc <- function(json_path, model = NULL) {
 #' `tp_summarise_trees()` reads the trees from the JSON output of a TreePPL
 #' tree-inference run (SMC, IS or MCMC) and summarises them with one tree: the
 #' maximum a posteriori (MAP) topology or the maximum clade credibility (MCC)
-#' tree. It can also return several trees to represent the uncertainty around
-#' that summary.
+#' tree. It also returns the support of each clade of that tree and the
+#' uncertainty in its node ages, and it can return several trees to represent
+#' the uncertainty around the summary.
 #'
 #' @details
 #' **Weights.** Each sampled tree gets its posterior weight: for SMC and IS,
@@ -211,6 +212,8 @@ tp_parse_mcmc <- function(json_path, model = NULL) {
 #'
 #' **Clades and topologies.** Trees are treated as rooted. A clade is the set
 #' of tips below an internal node; a topology is the set of clades of a tree.
+#' The posterior probability of a clade is the summed weight of the sampled
+#' trees that contain it.
 #' * `method = "MAP"`: the score of a tree is the posterior probability of
 #'   its topology (the summed weight of all sampled trees with that topology).
 #'   The summary tree is the topology with the highest probability.
@@ -219,10 +222,26 @@ tp_parse_mcmc <- function(json_path, model = NULL) {
 #'   the sampled topology with the highest clade credibility.
 #'
 #' **Node ages.** In a summary tree (and in the trees returned with
-#' `random = FALSE`), each node's age is the weighted mean age of that clade:
-#' over the sampled trees with the same topology (MAP), or over all sampled
-#' trees that contain the clade (MCC). Branch lengths are differences of ages.
-#' Trees returned with `random = TRUE` keep their own sampled branch lengths.
+#' `random = FALSE`), each node's age is the weighted mean or median
+#' (`heights`) age of that clade: over the sampled trees with the same
+#' topology (MAP), or over all sampled trees that contain the clade (MCC).
+#' Branch lengths are differences of ages. Trees returned with
+#' `random = TRUE` keep their own sampled branch lengths.
+#'
+#' With `method = "MAP"`, all node ages come from the same trees, so every
+#' parent is at least as old as its children. With `method = "MCC"`, a parent
+#' and its child are averaged over different sets of trees, and a child can
+#' come out older than its parent, giving a negative branch length (as in
+#' BEAST's TreeAnnotator). This is reported with a warning; it is most likely
+#' when the clades involved have low support.
+#'
+#' **Uncertainty.** `node_summary` gives, for each internal node of the
+#' summary tree, the posterior probability of its clade and the weighted mean,
+#' median and 95% highest posterior density (HPD) interval of its age, over
+#' the same trees used for the node ages. The HPD interval is the shortest
+#' interval that holds 95% of the weight, as in BEAST. The clade
+#' probabilities are also stored as the node labels of `tree`, so
+#' `plot(res$tree, show.node.label = TRUE)` shows them.
 #'
 #' **Tips.** TreePPL identifies tips by their `index`, the row of the
 #' alignment they came from. Give the taxon names with `tip_labels`, in the
@@ -232,6 +251,8 @@ tp_parse_mcmc <- function(json_path, model = NULL) {
 #' @param trees Path(s) to one or more JSON output files of a tree-inference
 #'   model, as returned by [tp_run()].
 #' @param method Summary method: `"MAP"` or `"MCC"` (see Details).
+#' @param heights Node ages of the summary tree: the weighted `"mean"`
+#'   (default) or `"median"` age of each clade (see Details).
 #' @param samples Number of trees to return to represent uncertainty. With
 #'   `samples = 1` (default) only the summary tree is returned.
 #' @param random Logical. How the `samples` trees are chosen: if `TRUE`
@@ -242,9 +263,14 @@ tp_parse_mcmc <- function(json_path, model = NULL) {
 #'   of the alignment rows.
 #'
 #' @return A list with elements:
-#'   * `tree`: the summary tree, a rooted `ape::phylo` object.
+#'   * `tree`: the summary tree, a rooted `ape::phylo` object, with the clade
+#'     probabilities as node labels.
 #'   * `tree_score`: its score, a number named after `method`
 #'     (e.g. `c(MAP = 0.42)`).
+#'   * `node_summary`: a tibble with one row per internal node of `tree`:
+#'     `node` (its number in `tree`), `posterior` (probability of the clade),
+#'     `age_mean`, `age_median`, `age_lower` and `age_upper` (95% HPD
+#'     interval), and `n_trees` (number of sampled trees used for that node).
 #'   * `sample`: only if `samples > 1`, an `ape::multiPhylo` object with the
 #'     `samples` trees.
 #'   * `sample_scores`: only if `samples > 1`, a tibble with one row per tree
@@ -263,11 +289,13 @@ tp_parse_mcmc <- function(json_path, model = NULL) {
 #' res <- tp_summarise_trees(
 #'   trees = "out.json",
 #'   method = "MCC",
+#'   heights = "median",
 #'   samples = 100,
 #'   tip_labels = names(aln)
 #' )
-#' plot(res$tree)
+#' plot(res$tree, show.node.label = TRUE)
 #' res$tree_score
+#' res$node_summary
 #'
 #' # The 5 most probable topologies after the MAP topology
 #' top <- tp_summarise_trees("out.json",
@@ -277,13 +305,15 @@ tp_parse_mcmc <- function(json_path, model = NULL) {
 #' top$sample_scores
 #' }
 tp_summarise_trees <- function(
-    trees,
-    method = c("MAP", "MCC"),
-    samples = 1,
-    random = TRUE,
-    tip_labels = NULL
+  trees,
+  method = c("MAP", "MCC"),
+  heights = c("mean", "median"),
+  samples = 1,
+  random = TRUE,
+  tip_labels = NULL
 ) {
   method <- match.arg(method)
+  heights <- match.arg(heights)
   .check_summary_args(samples, random)
 
   draws <- .read_tree_samples(trees)
@@ -299,14 +329,19 @@ tp_summarise_trees <- function(
     } else {
       rep(TRUE, length(parts))
     }
-    .summary_phylo(parts, i, in_set, weight, labels)
+    .summary_phylo(
+      parts, i, in_set, weight, labels, heights, scored$clade_prob
+    )
   }
 
   best <- scored$ranked[1]
+  summary <- build_summary(best)
   out <- list(
-    tree = build_summary(best),
-    tree_score = stats::setNames(scored$score[best], method)
+    tree = summary$tree,
+    tree_score = stats::setNames(scored$score[best], method),
+    node_summary = summary$nodes
   )
+  built <- list(out$tree) # trees whose ages were summarised, to check below
 
   if (samples > 1) {
     if (random) {
@@ -317,18 +352,19 @@ tp_summarise_trees <- function(
       sampled <- lapply(idx, function(i) .parts_to_phylo(parts[[i]], labels))
     } else {
       idx <- .top_topologies(scored$ranked, samples)
-      sampled <- lapply(idx, build_summary)
+      sampled <- lapply(idx, function(i) build_summary(i)$tree)
+      built <- c(built, sampled)
     }
-    if (length(idx) == 0) {
-      return(out) # a single topology was sampled: nothing to rank below it
+    if (length(idx) > 0) {
+      out$sample <- structure(sampled, class = "multiPhylo")
+      out$sample_scores <- tibble::tibble(
+        tree_id = seq_along(idx),
+        score = scored$score[idx]
+      )
     }
-    out$sample <- structure(sampled, class = "multiPhylo")
-    out$sample_scores <- tibble::tibble(
-      tree_id = seq_along(idx),
-      score = scored$score[idx]
-    )
   }
 
+  .check_branch_lengths(built)
   out
 }
 
@@ -603,7 +639,7 @@ tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
 
   # strip redundant outer parentheses: return(p) -> p
   while (startsWith(expr, "(") && endsWith(expr, ")") &&
-         nchar(.extract_balanced(expr, 1)) == nchar(expr) - 2) {
+    nchar(.extract_balanced(expr, 1)) == nchar(expr) - 2) {
     expr <- trimws(substr(expr, 2, nchar(expr) - 1))
   }
 
@@ -821,8 +857,9 @@ tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
 #' MAP score: posterior probability of the tree's topology. MCC score: product
 #' of the posterior probabilities of the tree's clades.
 #'
-#' @return A list with `score` (one per tree), `topology` (one key per tree)
-#'   and `ranked` (one tree per distinct topology, best first; ties broken by
+#' @return A list with `score` (one per tree), `topology` (one key per tree),
+#'   `clade_prob` (posterior probability of every clade, by key) and
+#'   `ranked` (one tree per distinct topology, best first; ties broken by
 #'   the topology's posterior probability).
 #' @noRd
 .score_trees <- function(parts, weight, method) {
@@ -844,7 +881,12 @@ tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
   ranked <- which(!duplicated(topology))
   ranked <- ranked[order(-score[ranked], -topo_prob[topology[ranked]])]
 
-  list(score = score, topology = topology, ranked = ranked)
+  list(
+    score = score,
+    topology = topology,
+    ranked = ranked,
+    clade_prob = clade_prob
+  )
 }
 
 #' The `samples` distinct topologies ranked right below the summary tree
@@ -1018,23 +1060,34 @@ tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
 
 #' Build the summary tree for the topology of tree `i`
 #'
-#' Node ages are the weighted mean age of each clade over the trees in
-#' `in_set`; tip ages are averaged the same way.
+#' Node ages are the weighted mean or median (`heights`) age of each clade
+#' over the trees in `in_set`; tip ages are the weighted mean. Only the
+#' clades of tree `i` are summarised.
+#'
+#' @return A list with `tree` (ape::phylo, clade probabilities as node
+#'   labels) and `nodes` (tibble: one row per internal node of `tree`).
 #' @noRd
-.summary_phylo <- function(parts, i, in_set, weight, labels) {
+.summary_phylo <- function(parts, i, in_set, weight, labels, heights,
+                           clade_prob) {
   target <- parts[[i]]
   n_tips <- target$n_tips
   set <- which(in_set & weight > 0)
   if (length(set) == 0) set <- which(in_set)
 
-  # weighted mean age of every clade over the trees in the set
+  # ages of the target's clades in every tree of the set that has them
   keys <- unlist(lapply(parts[set], `[[`, "clades"), use.names = FALSE)
   ages <- unlist(
-    lapply(parts[set], function(p) p$age[(p$n_tips + 1):length(p$age)]),
+    lapply(parts[set], function(p) p$age[-seq_len(p$n_tips)]),
     use.names = FALSE
   )
   w <- rep(weight[set], lengths(lapply(parts[set], `[[`, "clades")))
-  mean_age <- tapply(w * ages, keys, sum) / tapply(w, keys, sum)
+  keep <- keys %in% target$clades
+  by_clade <- split(
+    which(keep), factor(keys[keep], levels = target$clades)
+  )
+  stats <- vapply(
+    by_clade, function(j) .age_stats(ages[j], w[j]), numeric(5)
+  )
 
   tip_ages <- vapply(
     parts[set], function(p) p$age[seq_len(n_tips)], numeric(n_tips)
@@ -1045,8 +1098,72 @@ tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
     tip_ages
   }
 
-  age <- c(tip_ages, unname(mean_age[target$clades]))
-  .parts_to_phylo(target, labels, age)
+  posterior <- as.vector(clade_prob[target$clades])
+  node_age <- stats[if (heights == "mean") "mean" else "median", ]
+  tree <- .parts_to_phylo(target, labels, c(tip_ages, unname(node_age)))
+  tree$node.label <- as.character(signif(posterior, 3))
+
+  nodes <- tibble::tibble(
+    node = n_tips + seq_along(target$clades),
+    posterior = posterior,
+    age_mean = unname(stats["mean", ]),
+    age_median = unname(stats["median", ]),
+    age_lower = unname(stats["lower", ]),
+    age_upper = unname(stats["upper", ]),
+    n_trees = as.integer(stats["n", ])
+  )
+  list(tree = tree, nodes = nodes)
+}
+
+#' Weighted mean, median and HPD interval of a set of ages
+#'
+#' The HPD interval is the shortest interval of sorted ages whose weights sum
+#' to at least `level`.
+#' @return A named vector: `mean`, `median`, `lower`, `upper`, `n`.
+#' @noRd
+.age_stats <- function(x, w, level = 0.95) {
+  o <- order(x)
+  x <- x[o]
+  w <- w[o]
+  if (sum(w) <= 0) w <- rep(1, length(w))
+  w <- w / sum(w)
+  cw <- cumsum(w)
+  tol <- 1e-12
+
+  # for each start i, the first end j with weight(x[i..j]) >= level
+  end <- findInterval(cw - w + level - tol, cw, left.open = TRUE) + 1L
+  ok <- end <= length(x)
+  start <- which(ok)
+  best <- start[which.min(x[end[ok]] - x[start])]
+
+  c(
+    mean = sum(w * x),
+    median = x[which(cw >= 0.5 - tol)[1]],
+    lower = x[best],
+    upper = x[end[best]],
+    n = length(x)
+  )
+}
+
+#' Warn when summarised node ages give negative branch lengths
+#'
+#' Can only happen with method = "MCC", where a parent and its child are
+#' averaged over different sets of trees.
+#' @noRd
+.check_branch_lengths <- function(trees, call = parent.frame()) {
+  n_neg <- vapply(trees, function(t) sum(t$edge.length < 0), numeric(1))
+  if (sum(n_neg) == 0) {
+    return(invisible())
+  }
+  n_trees <- sum(n_neg > 0)
+  cli::cli_warn(c(
+    "{sum(n_neg)} branch{?es} in {n_trees} summary tree{?s} {?has/have} a negative length.",
+    "i" = paste(
+      "A child clade came out older than its parent: the clades involved",
+      "probably have low support (see {.field node_summary})."
+    ),
+    "i" = "Try {.code method = \"MAP\"} or more samples."
+  ), call = call)
 }
 
 #' Collect the nodes and events of one sampled host-repertoire tree
@@ -1105,7 +1222,8 @@ tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
     return(tibble::as_tibble(list(
       sample = rep(seq_along(walks), vapply(n_hosts, sum, numeric(1))),
       node = unlist(Map(rep, lapply(walks, `[[`, "node"), n_hosts),
-                    use.names = FALSE),
+        use.names = FALSE
+      ),
       host = unlist(lapply(unlist(n_hosts), seq_len), use.names = FALSE),
       state = unlist(reps, use.names = FALSE)
     )))

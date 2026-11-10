@@ -7,6 +7,7 @@
 tp_summarise_trees(
   trees,
   method = c("MAP", "MCC"),
+  heights = c("mean", "median"),
   samples = 1,
   random = TRUE,
   tip_labels = NULL
@@ -17,6 +18,9 @@ tp_summarise_trees(
 model, as returned by \code{\link[=tp_run]{tp_run()}}.}
 
 \item{method}{Summary method: \code{"MAP"} or \code{"MCC"} (see Details).}
+
+\item{heights}{Node ages of the summary tree: the weighted \code{"mean"}
+(default) or \code{"median"} age of each clade (see Details).}
 
 \item{samples}{Number of trees to return to represent uncertainty. With
 \code{samples = 1} (default) only the summary tree is returned.}
@@ -32,9 +36,14 @@ of the alignment rows.}
 \value{
 A list with elements:
 \itemize{
-\item \code{tree}: the summary tree, a rooted \code{ape::phylo} object.
+\item \code{tree}: the summary tree, a rooted \code{ape::phylo} object, with the clade
+probabilities as node labels.
 \item \code{tree_score}: its score, a number named after \code{method}
 (e.g. \code{c(MAP = 0.42)}).
+\item \code{node_summary}: a tibble with one row per internal node of \code{tree}:
+\code{node} (its number in \code{tree}), \code{posterior} (probability of the clade),
+\code{age_mean}, \code{age_median}, \code{age_lower} and \code{age_upper} (95\% HPD
+interval), and \code{n_trees} (number of sampled trees used for that node).
 \item \code{sample}: only if \code{samples > 1}, an \code{ape::multiPhylo} object with the
 \code{samples} trees.
 \item \code{sample_scores}: only if \code{samples > 1}, a tibble with one row per tree
@@ -46,8 +55,9 @@ and \code{score}, its score under \code{method}.
 \code{tp_summarise_trees()} reads the trees from the JSON output of a TreePPL
 tree-inference run (SMC, IS or MCMC) and summarises them with one tree: the
 maximum a posteriori (MAP) topology or the maximum clade credibility (MCC)
-tree. It can also return several trees to represent the uncertainty around
-that summary.
+tree. It also returns the support of each clade of that tree and the
+uncertainty in its node ages, and it can return several trees to represent
+the uncertainty around the summary.
 }
 \details{
 \strong{Weights.} Each sampled tree gets its posterior weight: for SMC and IS,
@@ -57,6 +67,8 @@ without samples, or with a normalising constant of \code{-Inf}, are skipped.
 
 \strong{Clades and topologies.} Trees are treated as rooted. A clade is the set
 of tips below an internal node; a topology is the set of clades of a tree.
+The posterior probability of a clade is the summed weight of the sampled
+trees that contain it.
 \itemize{
 \item \code{method = "MAP"}: the score of a tree is the posterior probability of
 its topology (the summed weight of all sampled trees with that topology).
@@ -67,10 +79,26 @@ the sampled topology with the highest clade credibility.
 }
 
 \strong{Node ages.} In a summary tree (and in the trees returned with
-\code{random = FALSE}), each node's age is the weighted mean age of that clade:
-over the sampled trees with the same topology (MAP), or over all sampled
-trees that contain the clade (MCC). Branch lengths are differences of ages.
-Trees returned with \code{random = TRUE} keep their own sampled branch lengths.
+\code{random = FALSE}), each node's age is the weighted mean or median
+(\code{heights}) age of that clade: over the sampled trees with the same
+topology (MAP), or over all sampled trees that contain the clade (MCC).
+Branch lengths are differences of ages. Trees returned with
+\code{random = TRUE} keep their own sampled branch lengths.
+
+With \code{method = "MAP"}, all node ages come from the same trees, so every
+parent is at least as old as its children. With \code{method = "MCC"}, a parent
+and its child are averaged over different sets of trees, and a child can
+come out older than its parent, giving a negative branch length (as in
+BEAST's TreeAnnotator). This is reported with a warning; it is most likely
+when the clades involved have low support.
+
+\strong{Uncertainty.} \code{node_summary} gives, for each internal node of the
+summary tree, the posterior probability of its clade and the weighted mean,
+median and 95\% highest posterior density (HPD) interval of its age, over
+the same trees used for the node ages. The HPD interval is the shortest
+interval that holds 95\% of the weight, as in BEAST. The clade
+probabilities are also stored as the node labels of \code{tree}, so
+\code{plot(res$tree, show.node.label = TRUE)} shows them.
 
 \strong{Tips.} TreePPL identifies tips by their \code{index}, the row of the
 alignment they came from. Give the taxon names with \code{tip_labels}, in the
@@ -84,11 +112,13 @@ aln <- ape::read.FASTA("alignment.fasta")
 res <- tp_summarise_trees(
   trees = "out.json",
   method = "MCC",
+  heights = "median",
   samples = 100,
   tip_labels = names(aln)
 )
-plot(res$tree)
+plot(res$tree, show.node.label = TRUE)
 res$tree_score
+res$node_summary
 
 # The 5 most probable topologies after the MAP topology
 top <- tp_summarise_trees("out.json",

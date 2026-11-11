@@ -31,14 +31,25 @@
 #' `return [lambda, mu, int2real(m)];` the columns are `lambda`, `mu` and `m`.
 #' Without `model`, or when the names can't be worked out, they are `x1`,
 #' `x2`, ...
-#' Non-scalar values (vectors, trees) are kept as list-columns; for trees, use
-#' [tp_summarise_trees()].
+#' Vectors of numbers are spread into one column per element, named after
+#' the parameter. For instance, `stationary_probs` from model
+#' `substmodel_belief_propagation` is a vector of numbers with 4 values per particle;
+#' it is therefore converted into 4 columns, `stationary_probs_1` to `stationary_probs_4`.
+#' Other non-scalar values (trees, records) are kept as list-columns;
+#' for trees, use [tp_summarise_trees()].
+#' Use `exclude` to leave out fields that are not needed, typically the
+#' sampled trees of models that return a tree with their parameters (e.g.
+#' host-repertoire models: `exclude = "tree"`).
 #'
 #' @param json_path Path(s) to one or more JSON output files, as returned by
 #'   [tp_run()]. Sweeps are numbered consecutively across files.
 #' @param model Optional: the model that produced the output, as a model name
 #'   from [tp_model_library()] (e.g. `"clads2"`) or the path to its `.tppl`
 #'   file. Used to name the parameter columns (see Details).
+#' @param exclude Optional character vector of fields to leave out (e.g.
+#'   `"tree"`). They are removed from the text before it is parsed, which
+#'   makes reading large outputs much faster and lighter on memory. Fields
+#'   that are not in the output are ignored.
 #'
 #' @return A tibble (tidy data frame) with one row per particle and columns:
 #'   * `sweep`: sweep number.
@@ -57,8 +68,8 @@
 #' \dontrun{
 #' samples <- tp_parse_smc("out.json", model = "clads2")
 #' }
-tp_parse_smc <- function(json_path, model = NULL) {
-  lines <- .read_tppl_lines(json_path)
+tp_parse_smc <- function(json_path, model = NULL, exclude = NULL) {
+  lines <- .exclude_fields(.read_tppl_lines(json_path), exclude)
 
   sweeps <- lapply(seq_along(lines), function(i) {
     sweep <- jsonlite::parse_json(lines[i])
@@ -139,8 +150,15 @@ tp_parse_smc <- function(json_path, model = NULL) {
 #' `return [lambda, mu, int2real(m)];` the columns are `lambda`, `mu` and `m`.
 #' Without `model`, or when the names can't be worked out, they are `x1`,
 #' `x2`, ...
-#' Non-scalar values (vectors, trees) are kept as list-columns; for trees, use
-#' [tp_summarise_trees()].
+#' Vectors of numbers are spread into one column per element, named after
+#' the parameter. For instance, `stationary_probs` from model
+#' `substmodel_belief_propagation` is a vector of numbers with 4 values per particle;
+#' it is therefore converted into 4 columns, `stationary_probs_1` to `stationary_probs_4`.
+#' Other non-scalar values (trees, records) are kept as list-columns;
+#' for trees, use [tp_summarise_trees()].
+#' Use `exclude` to leave out fields that are not needed, typically the
+#' sampled trees of models that return a tree with their parameters (e.g.
+#' host-repertoire models: `exclude = "tree"`).
 #'
 #' Files without samples are skipped with a warning. If no file has samples,
 #' the function stops with an error.
@@ -150,6 +168,10 @@ tp_parse_smc <- function(json_path, model = NULL) {
 #' @param model Optional: the model that produced the output, as a model name
 #'   from [tp_model_library()] (e.g. `"clads2"`) or the path to its `.tppl`
 #'   file. Used to name the parameter columns (see Details).
+#' @param exclude Optional character vector of fields to leave out (e.g.
+#'   `"tree"`). They are removed from the text before it is parsed, which
+#'   makes reading large outputs much faster and lighter on memory. Fields
+#'   that are not in the output are ignored.
 #'
 #' @return A tibble (tidy data frame) with one row per iteration and columns:
 #'   * `run`: run number, in the order of `json_path`.
@@ -165,9 +187,9 @@ tp_parse_smc <- function(json_path, model = NULL) {
 #' \dontrun{
 #' samples <- tp_parse_mcmc(c("out1.json", "out2.json"), model = "clads2")
 #' }
-tp_parse_mcmc <- function(json_path, model = NULL) {
+tp_parse_mcmc <- function(json_path, model = NULL, exclude = NULL) {
   runs <- lapply(seq_along(json_path), function(run_id) {
-    samples <- .read_mcmc_samples(json_path[run_id])
+    samples <- .read_mcmc_samples(json_path[run_id], exclude)
 
     if (length(samples) == 0) {
       cli::cli_warn(
@@ -389,95 +411,50 @@ tp_summarise_trees <- function(
   out
 }
 
-#' Parse the output of a TreePPL host-repertoire run
-#'
-#' @description
-#' `tp_parse_hrm()` reads the JSON output of a host-repertoire model (e.g.
-#' `"flat-root-prior-HRM"`, `"subroot-HRM"`) and returns the sampled model
-#' parameters as a tidy data frame (tibble), with one row per sample.
-#'
-#' @details
-#' Each sample of a host-repertoire run holds the model parameters and the
-#' symbiont tree with a sampled history of host repertoires. The trees are
-#' removed from the text before it is parsed, which makes reading large
-#' outputs fast and light on memory; the repertoires and events are not
-#' returned. What is left is read with [tp_parse_smc()] or [tp_parse_mcmc()]
-#' through temporary files, which are deleted afterwards.
-#'
-#' Host states are `0` (non-host), `1` (potential host) and `2` (actual
-#' host). The relative transition rates (`lambda`) are named after the
-#' transition they stand for, `lambda_<from><to>`: with three states
-#' `lambda_01`, `lambda_10`, `lambda_12` and `lambda_21`; with two states
-#' `lambda_01` and `lambda_10`, or `lambda_02` and `lambda_20` when the
-#' repertoires are coded with `0` and `2`.
-#'
-#' Sweeps, particles and weights are handled as in [tp_parse_smc()] (SMC and
-#' IS) and [tp_parse_mcmc()] (MCMC), including skipped sweeps and particles
-#' with zero weight.
-#'
-#' @param json_path Path(s) to one or more JSON output files, as returned by
-#'   [tp_run()].
-#' @param method Inference method of the run: `"smc"`, `"is"` or `"mcmc"`.
-#'
-#' @return A tibble with one row per sample and columns:
-#'   * `sample`: row number.
-#'   * `sweep`, `particle`, `log_weight`, `norm_constant` and `norm_weight`
-#'     (SMC and IS, see [tp_parse_smc()]), or `run` and `iteration` (MCMC).
-#'   * the `lambda_*` rates, `mu` (rate scaling) and `beta` (effect of host
-#'     distances).
-#'
-#' @seealso [tp_parse_smc()] and [tp_parse_mcmc()] for other models.
-#'
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' params <- tp_parse_hrm("out.json", method = "smc")
-#'
-#' # Posterior mean of each parameter
-#' w <- params$norm_weight / sum(params$norm_weight)
-#' colSums(params[c("lambda_01", "lambda_10", "mu", "beta")] * w)
-#' }
-tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
-  method <- match.arg(method)
+# Helper Functions ------------------------------------------------------------------
 
-  # Remove the trees (nearly all of the text) and pass what is left to the
-  # general parsers through temporary files, one per input file. The host
-  # states are read before the trees, which hold the repertoires.
-  lines <- lapply(json_path, .read_tppl_lines)
-  states <- .hrm_states(unlist(lines, use.names = FALSE))
-  stripped <- vapply(seq_along(lines), function(i) {
-    path <- tempfile(fileext = ".json")
-    writeLines(.strip_hrm_tree(lines[[i]]), path)
-    path
-  }, character(1))
-  on.exit(unlink(stripped), add = TRUE)
-
-  params <- if (method == "mcmc") {
-    tp_parse_mcmc(stripped)
-  } else {
-    tp_parse_smc(stripped)
+#' Remove fields from TreePPL output lines before they are parsed
+#'
+#' Each field in `exclude` is removed wherever it appears, whatever its value:
+#' a whole `{...}` object or `[...]` array (matched by a recursive regular
+#' expression, however deeply nested), a string, or a number. The field is
+#' removed together with one neighbouring comma, so the JSON stays valid.
+#' Lines without the field are left untouched, so excluding a field that is
+#' not in the output does nothing.
+#' @noRd
+.exclude_fields <- function(lines, exclude, call = parent.frame()) {
+  if (is.null(exclude)) {
+    return(lines)
   }
-  if (!"lambda" %in% names(params)) {
+  if (!is.character(exclude) || anyNA(exclude)) {
     cli::cli_abort(
-      "{.file {json_path}} doesn't look like host-repertoire output."
+      "{.arg exclude} must be a character vector of field names.",
+      call = call
+    )
+  }
+  reserved <- intersect(exclude, c("samples", "weights", "normConst"))
+  if (length(reserved) > 0) {
+    cli::cli_abort(
+      "Can't exclude {.field {reserved}}: {?it is/they are} part of every output.",
+      call = call
     )
   }
 
-  # Spread lambda into one named column per transition
-  lambda <- do.call(rbind, lapply(params$lambda, unlist))
-  colnames(lambda) <- .lambda_names(ncol(lambda), states)
-
-  id_cols <- setdiff(names(params), c("lambda", "mu", "beta"))
-  tibble::as_tibble(c(
-    list(sample = seq_len(nrow(params))),
-    params[id_cols],
-    as.data.frame(lambda),
-    params[intersect(c("mu", "beta"), names(params))]
-  ))
+  # a JSON value: a whole {...} object or [...] array, however deeply
+  # nested, a string, or a number / true / false / null
+  value <- paste0(
+    "(?:(\\{(?:[^{}]++|(?-1))*\\})|(\\[(?:[^\\[\\]]++|(?-1))*\\])",
+    '|"[^"]*"|[^,{}\\[\\]\\s]+)'
+  )
+  for (field in exclude) {
+    has <- grepl(paste0('"', field, '"'), lines, fixed = TRUE)
+    if (!any(has)) next
+    key <- paste0('"\\Q', field, '\\E"\\s*:\\s*')
+    lines[has] <- gsub(paste0(",\\s*", key, value), "", lines[has], perl = TRUE)
+    lines[has] <- gsub(paste0(key, value, "\\s*,?"), "", lines[has], perl = TRUE)
+  }
+  lines
 }
-
-# Helper Functions ------------------------------------------------------------------
 
 #' Rename the x1, x2, ... columns after the values the model returns
 #'
@@ -714,9 +691,10 @@ tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
 #'
 #' Default format: one summary line holding all samples. Incremental printing:
 #' one sample per line, then an (empty) summary line, which is dropped.
+#' Fields in `exclude` are removed before parsing (see .exclude_fields()).
 #' @noRd
-.read_mcmc_samples <- function(file) {
-  lines <- .read_tppl_lines(file)
+.read_mcmc_samples <- function(file, exclude = NULL) {
+  lines <- .exclude_fields(.read_tppl_lines(file), exclude)
   is_summary <- grepl('^\\s*\\{\\s*"samples"\\s*:', lines)
   sample_lines <- lines[!is_summary]
 
@@ -738,8 +716,9 @@ tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
 #' sample. Simplifying it here is much faster than letting jsonlite do it.
 #' Each sample is either a number (one parameter), an array of numbers
 #' (several unnamed parameters: x1, x2, ...) or a record whose fields are under
-#' `__data__` (named parameters). Fields that are not single numbers (vectors,
-#' trees) become list-columns.
+#' `__data__` (named parameters). Vectors of numbers are spread into one
+#' column per element (see .expand_vector_columns()); other values that are
+#' not single numbers (trees, records) become list-columns.
 #' @noRd
 .samples_to_df <- function(samples) {
   first <- samples[[1]]
@@ -766,7 +745,7 @@ tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
     cols <- list(x1 = samples)
   }
 
-  cols <- lapply(cols, .simplify_column)
+  cols <- .expand_vector_columns(lapply(cols, .simplify_column))
   structure(cols, class = "data.frame", row.names = c(NA, -length(samples)))
 }
 
@@ -784,6 +763,38 @@ tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
     return(if (is.character(values)) .as_num(values) else values)
   }
   col
+}
+
+#' Spread list-columns of numeric vectors into one column per element
+#'
+#' A list-column whose values are all vectors of numbers of the same length k
+#' (k >= 2) becomes k numeric columns, `<name>_1`, ..., `<name>_<k>`, in the
+#' same place. Columns holding trees, records or vectors of different
+#' lengths are kept as they are.
+#' @noRd
+.expand_vector_columns <- function(cols) {
+  expanded <- lapply(names(cols), function(name) {
+    col <- cols[[name]]
+    if (!is.list(col)) {
+      return(stats::setNames(list(col), name))
+    }
+    k <- unique(lengths(col))
+    if (length(k) != 1 || k < 2) {
+      return(stats::setNames(list(col), name))
+    }
+    items <- unlist(col, recursive = FALSE, use.names = FALSE)
+    if (any(lengths(items) != 1) || any(vapply(items, is.list, logical(1)))) {
+      return(stats::setNames(list(col), name)) # e.g. trees or records
+    }
+    values <- unlist(items, use.names = FALSE)
+    if (is.character(values)) values <- .as_num(values)
+    mat <- matrix(values, ncol = k, byrow = TRUE)
+    stats::setNames(
+      lapply(seq_len(k), function(j) mat[, j]),
+      paste0(name, "_", seq_len(k))
+    )
+  })
+  unlist(expanded, recursive = FALSE)
 }
 
 #' as.numeric() without warnings ("nan", "-inf" become NaN, -Inf)
@@ -1213,52 +1224,4 @@ tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
     ),
     "i" = "Try {.code method = \"MAP\"} or more samples."
   ), call = call)
-}
-
-#' Names of the lambda rates, after the transitions they stand for
-#'
-#' Four rates: three states (0, 1, 2). Two rates: two states, `0` and `1`, or
-#' `0` and `2` when that is how the repertoires are coded.
-#' @noRd
-.lambda_names <- function(n_lambda, states) {
-  if (n_lambda == 4) {
-    return(c("lambda_01", "lambda_10", "lambda_12", "lambda_21"))
-  }
-  if (n_lambda == 2) {
-    if (2 %in% states && !1 %in% states) {
-      return(c("lambda_02", "lambda_20"))
-    }
-    return(c("lambda_01", "lambda_10"))
-  }
-  paste0("lambda_", seq_len(n_lambda)) # unknown layout: number them
-}
-
-#' Remove the `tree` field of host-repertoire samples from JSON lines
-#'
-#' A recursive regular expression matches the whole tree object, however
-#' deeply nested. The field is removed together with one neighbouring comma,
-#' so the JSON stays valid.
-#' @noRd
-.strip_hrm_tree <- function(lines) {
-  key <- '"tree"\\s*:\\s*'
-  obj <- "(\\{(?:[^{}]++|(?-1))*\\})"
-  lines <- gsub(paste0(",\\s*", key, obj), "", lines, perl = TRUE)
-  gsub(paste0(key, obj, "\\s*,?"), "", lines, perl = TRUE)
-}
-
-#' Host states used in host-repertoire output
-#'
-#' Read from the repertoires in the first line that has any (states are
-#' single digits: 0, 1, 2).
-#' @noRd
-.hrm_states <- function(lines) {
-  first <- lines[grepl('"repertoire"', lines, fixed = TRUE)][1]
-  if (is.na(first)) {
-    return(integer(0))
-  }
-  reps <- regmatches(
-    first, gregexpr('"repertoire"\\s*:\\s*\\[[0-9,\\s]*\\]', first, perl = TRUE)
-  )[[1]]
-  digits <- gsub("[^0-9]", "", sub("^[^[]*", "", reps))
-  sort(unique(as.integer(strsplit(paste(digits, collapse = ""), "")[[1]])))
 }

@@ -108,20 +108,7 @@ tp_run <- function(
   .parse_output(output_paths, model = model_path, method = method, dir = dir)
 }
 
-
 # Helper Functions ------------------------------------------------------------------
-
-#' Model categories without an output parser
-#'
-#' @description
-#' `.no_parser_categories` lists the model categories whose output can't be
-#' parsed yet, because they return trees. This is a temporary solution until
-#' parsers for these models are available.
-#' @noRd
-.no_parser_categories <- c(
-  "host-repertoire-evolution",
-  "tree-inference"
-)
 
 #' Check for a single positive whole number
 #'
@@ -222,29 +209,30 @@ tp_run <- function(
 #' @return A tidy data frame, or `files` if no parser is available.
 #' @noRd
 .parse_output <- function(files, model, method, dir) {
-  library <- tp_model_library()
-  category <- library$category[match(model, library$model_name)]
+  model_name <- basename(model)
+  model_name <- gsub("\\.tppl", "", model_name)
 
-  if (!category %in% .no_parser_categories) {
+  if (startsWith(model_name, "tree_inference")) {
+    cli::cli_warn(c(
+      "Summarised the sampled trees with the maximum a posteriori (MAP) topology, with median node ages.",
+      "i" = "For other summaries (e.g. MCC, mean node ages, burn-in), use {.fn tp_summarise_trees}."
+    ))
+    return(tp_summarise_trees(trees = files, method = "MAP", heights = "median"))
+  }
+
+  if (!startsWith(model_name, "tree_inference")) {
     if (startsWith(method, "smc")) {
-      return(tp_parse_smc(files, model = model))
+      return(tp_parse_smc(files, model = model, exclude = "tree"))
     }
 
     if (startsWith(method, "is")) {
-      return(tp_parse_smc(files, model = model))
+      return(tp_parse_smc(files, model = model, exclude = "tree"))
     }
 
     if (startsWith(method, "mcmc")) {
-      return(tp_parse_mcmc(files, model = model))
+      return(tp_parse_mcmc(files, model = model, exclude = "tree"))
     }
   }
-
-  cli::cli_inform(c(
-    "No parser is available yet for this model.",
-    "i" = "The {cli::qty(length(files))}output file{?s} can be found in: {dir}.",
-    "i" = "Click {.run [here](treepplr::tp_open_dir(\"{dir}\"))} to open the directory."
-  ))
-  files
 }
 
 # Printing Methods ------------------------------------------------------------------
@@ -271,5 +259,3 @@ tp_run <- function(
     "Output file(s)" = "{.val {files}}"
   ))
 }
-
-

@@ -4,7 +4,7 @@
 \alias{tp_parse_mcmc}
 \title{Parse the output of a TreePPL MCMC run}
 \usage{
-tp_parse_mcmc(json_path, model = NULL)
+tp_parse_mcmc(json_path, model = NULL, exclude = NULL)
 }
 \arguments{
 \item{json_path}{Path(s) to one or more JSON output files, as returned by
@@ -13,6 +13,11 @@ tp_parse_mcmc(json_path, model = NULL)
 \item{model}{Optional: the model that produced the output, as a model name
 from \code{\link[=tp_model_library]{tp_model_library()}} (e.g. \code{"clads2"}) or the path to its \code{.tppl}
 file. Used to name the parameter columns (see Details).}
+
+\item{exclude}{Optional character vector of fields to leave out (e.g.
+\code{"tree"}). They are removed from the text before it is parsed, which
+makes reading large outputs much faster and lighter on memory. Fields
+that are not in the output are ignored.}
 }
 \value{
 A tibble (tidy data frame) with one row per iteration and columns:
@@ -48,8 +53,15 @@ are named after the values in the model's \code{return} statement: for
 \code{return [lambda, mu, int2real(m)];} the columns are \code{lambda}, \code{mu} and \code{m}.
 Without \code{model}, or when the names can't be worked out, they are \code{x1},
 \code{x2}, ...
-Non-scalar values (vectors, trees) are kept as list-columns; for trees, use
-\code{\link[=tp_summarise_trees]{tp_summarise_trees()}}.
+Vectors of numbers are spread into one column per element, named after
+the parameter. For instance, \code{stationary_probs} from model
+\code{substmodel_belief_propagation} is a vector of numbers with 4 values per particle;
+it is therefore converted into 4 columns, \code{stationary_probs_1} to \code{stationary_probs_4}.
+Other non-scalar values (trees, records) are kept as list-columns;
+for trees, use \code{\link[=tp_summarise_trees]{tp_summarise_trees()}}.
+Use \code{exclude} to leave out fields that are not needed, typically the
+sampled trees of models that return a tree with their parameters (e.g.
+host-repertoire models: \code{exclude = "tree"}).
 
 Files without samples are skipped with a warning. If no file has samples,
 the function stops with an error.

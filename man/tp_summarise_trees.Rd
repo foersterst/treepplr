@@ -10,6 +10,7 @@ tp_summarise_trees(
   heights = c("mean", "median"),
   samples = 1,
   random = TRUE,
+  burnin = 0,
   tip_labels = NULL
 )
 }
@@ -29,6 +30,10 @@ model, as returned by \code{\link[=tp_run]{tp_run()}}.}
 (default), drawn at random from the posterior sample according to their
 weights; if \code{FALSE}, the \code{samples} best-scoring distinct topologies
 ranked right below the summary tree (which is not repeated).}
+
+\item{burnin}{MCMC burn-in: the fraction (\verb{0 <= burnin < 1}) or the number
+(a whole number) of iterations to drop at the start of each run. Ignored
+for SMC and IS output (see Details). Default \code{0}, no burn-in.}
 
 \item{tip_labels}{Optional character vector of taxon names, in the order
 of the alignment rows.}
@@ -64,6 +69,11 @@ the uncertainty around the summary.
 \code{exp(log_weight + norm_constant)} of its particle, normalised over all
 particles of all sweeps; for MCMC, all iterations weigh the same. Sweeps
 without samples, or with a normalising constant of \code{-Inf}, are skipped.
+
+\strong{Burn-in.} For MCMC runs, \code{burnin} drops the first iterations of each
+run (each file) before the trees are summarised: a fraction of the run if
+\code{burnin < 1} (e.g. \code{0.25} drops the first 25\%), or a number of iterations
+otherwise. Burn-in does not apply to SMC and IS.
 
 \strong{Clades and topologies.} Trees are treated as rooted. A clade is the set
 of tips below an internal node; a topology is the set of clades of a tree.
@@ -109,6 +119,7 @@ from \code{\link[=tp_dna_to_int]{tp_dna_to_int()}}); otherwise tips are labelled
 \dontrun{
 aln <- ape::read.FASTA("alignment.fasta")
 
+# SMC run: MCC tree with median node ages
 res <- tp_summarise_trees(
   trees = "out.json",
   method = "MCC",
@@ -126,6 +137,17 @@ top <- tp_summarise_trees("out.json",
   random = FALSE, tip_labels = names(aln)
 )
 top$sample_scores
+
+# Two MCMC runs, one file each: the first 25\% of the iterations of each
+# run are dropped as burn-in, then the trees of both runs are pooled
+mcmc <- tp_summarise_trees(
+  trees = c("run1.json", "run2.json"),
+  method = "MCC",
+  burnin = 0.25,
+  tip_labels = names(aln)
+)
+plot(mcmc$tree, show.node.label = TRUE)
+mcmc$node_summary
 }
 }
 \seealso{

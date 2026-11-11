@@ -210,6 +210,11 @@ tp_parse_mcmc <- function(json_path, model = NULL) {
 #' particles of all sweeps; for MCMC, all iterations weigh the same. Sweeps
 #' without samples, or with a normalising constant of `-Inf`, are skipped.
 #'
+#' **Burn-in.** For MCMC runs, `burnin` drops the first iterations of each
+#' run (each file) before the trees are summarised: a fraction of the run if
+#' `burnin < 1` (e.g. `0.25` drops the first 25%), or a number of iterations
+#' otherwise. Burn-in does not apply to SMC and IS.
+#'
 #' **Clades and topologies.** Trees are treated as rooted. A clade is the set
 #' of tips below an internal node; a topology is the set of clades of a tree.
 #' The posterior probability of a clade is the summed weight of the sampled
@@ -259,6 +264,9 @@ tp_parse_mcmc <- function(json_path, model = NULL) {
 #'   (default), drawn at random from the posterior sample according to their
 #'   weights; if `FALSE`, the `samples` best-scoring distinct topologies
 #'   ranked right below the summary tree (which is not repeated).
+#' @param burnin MCMC burn-in: the fraction (`0 <= burnin < 1`) or the number
+#'   (a whole number) of iterations to drop at the start of each run. Ignored
+#'   for SMC and IS output (see Details). Default `0`, no burn-in.
 #' @param tip_labels Optional character vector of taxon names, in the order
 #'   of the alignment rows.
 #'
@@ -286,6 +294,7 @@ tp_parse_mcmc <- function(json_path, model = NULL) {
 #' \dontrun{
 #' aln <- ape::read.FASTA("alignment.fasta")
 #'
+#' # SMC run: MCC tree with median node ages
 #' res <- tp_summarise_trees(
 #'   trees = "out.json",
 #'   method = "MCC",
@@ -303,6 +312,17 @@ tp_parse_mcmc <- function(json_path, model = NULL) {
 #'   random = FALSE, tip_labels = names(aln)
 #' )
 #' top$sample_scores
+#'
+#' # Two MCMC runs, one file each: the first 25% of the iterations of each
+#' # run are dropped as burn-in, then the trees of both runs are pooled
+#' mcmc <- tp_summarise_trees(
+#'   trees = c("run1.json", "run2.json"),
+#'   method = "MCC",
+#'   burnin = 0.25,
+#'   tip_labels = names(aln)
+#' )
+#' plot(mcmc$tree, show.node.label = TRUE)
+#' mcmc$node_summary
 #' }
 tp_summarise_trees <- function(
   trees,
@@ -310,13 +330,14 @@ tp_summarise_trees <- function(
   heights = c("mean", "median"),
   samples = 1,
   random = TRUE,
+  burnin = 0,
   tip_labels = NULL
 ) {
   method <- match.arg(method)
   heights <- match.arg(heights)
-  .check_summary_args(samples, random)
+  .check_summary_args(samples, random, burnin)
 
-  draws <- .read_tree_samples(trees)
+  draws <- .read_tree_samples(trees, burnin)
   parts <- lapply(draws$trees, .tppl_tree_parts)
   weight <- exp(draws$log_weight - max(draws$log_weight))
   weight <- weight / sum(weight)
@@ -789,9 +810,11 @@ tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
   tibble::as_tibble(out)
 }
 
-#' Check the `samples` and `random` arguments of tp_summarise_trees()
+#' Check the `samples`, `random` and `burnin` arguments of
+#' tp_summarise_trees()
 #' @noRd
-.check_summary_args <- function(samples, random, call = parent.frame()) {
+.check_summary_args <- function(samples, random, burnin,
+                                call = parent.frame()) {
   is_count <- is.numeric(samples) && length(samples) == 1 &&
     isTRUE(samples >= 1 && samples == round(samples))
   if (!is_count) {
@@ -805,6 +828,14 @@ tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
       "{.arg random} must be {.code TRUE} or {.code FALSE}.",
       call = call
     )
+  }
+  is_burnin <- is.numeric(burnin) && length(burnin) == 1 &&
+    isTRUE(burnin >= 0) && (burnin < 1 || burnin == round(burnin))
+  if (!is_burnin) {
+    cli::cli_abort(c(
+      "{.arg burnin} must be a fraction in [0, 1) or a whole number of iterations.",
+      "x" = "You supplied {.val {burnin}}."
+    ), call = call)
   }
 }
 
@@ -891,36 +922,73 @@ tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
 #' sequences `seq`, ...) are removed from the text before parsing: they make
 #' up nearly all of the file but are not needed to rebuild the trees.
 #'
+#' Files are read one at a time, so that the burn-in is applied to each MCMC
+#' run. A file is an MCMC run when its normalising constant is NaN or its
+#' samples are printed one per line (incremental printing).
+#'
 #' @return A list with `trees` (one parsed tree per sample) and `log_weight`.
 #' @noRd
-.read_tree_samples <- function(trees) {
-  lines <- .read_tppl_lines(trees)
-  lines <- .strip_tree_arrays(lines)
-
-  is_summary <- grepl('^\\s*\\{\\s*"samples"\\s*:', lines)
+.read_tree_samples <- function(trees, burnin = 0, call = parent.frame()) {
   out_trees <- list()
   out_lw <- numeric(0)
+  is_mcmc <- logical(0)
 
-  # Default format (SMC, IS, MCMC): one line per sweep with samples + weights
-  for (line in lines[is_summary]) {
-    sweep <- jsonlite::parse_json(line)
-    if (length(sweep$samples) == 0) next
-    norm_const <- .as_num(sweep$normConst)
-    if (length(norm_const) != 1 || identical(norm_const, -Inf)) next
-    lw <- .as_num(unlist(sweep$weights, use.names = FALSE))
-    # MCMC writes a NaN normalising constant: the weights alone count
-    if (is.finite(norm_const)) lw <- lw + norm_const
-    out_trees <- c(out_trees, sweep$samples)
-    out_lw <- c(out_lw, lw)
+  for (file in trees) {
+    lines <- .strip_tree_arrays(.read_tppl_lines(file))
+    is_summary <- grepl('^\\s*\\{\\s*"samples"\\s*:', lines)
+    file_trees <- list()
+    file_lw <- numeric(0)
+    mcmc <- any(!is_summary)
+
+    # Default format (SMC, IS, MCMC): one line per sweep with samples + weights
+    for (line in lines[is_summary]) {
+      sweep <- jsonlite::parse_json(line)
+      if (length(sweep$samples) == 0) next
+      norm_const <- .as_num(sweep$normConst)
+      if (length(norm_const) != 1 || identical(norm_const, -Inf)) next
+      lw <- .as_num(unlist(sweep$weights, use.names = FALSE))
+      # MCMC writes a NaN normalising constant: the weights alone count
+      if (is.nan(norm_const)) mcmc <- TRUE else lw <- lw + norm_const
+      file_trees <- c(file_trees, sweep$samples)
+      file_lw <- c(file_lw, lw)
+    }
+
+    # Incremental printing (MCMC): one tree per line, all with equal weight
+    if (any(!is_summary)) {
+      inc <- jsonlite::parse_json(
+        paste0("[", paste(lines[!is_summary], collapse = ","), "]")
+      )
+      file_trees <- c(file_trees, inc)
+      file_lw <- c(file_lw, rep(0, length(inc)))
+    }
+
+    # Burn-in: drop the first iterations of each MCMC run (file)
+    if (mcmc && burnin > 0) {
+      n <- length(file_trees)
+      n_drop <- if (burnin < 1) floor(burnin * n) else burnin
+      if (n_drop >= n) {
+        cli::cli_abort(c(
+          "{.arg burnin} removes every sample of {.file {file}}.",
+          "i" = "The run has {n} iteration{?s}."
+        ), call = call)
+      }
+      keep_run <- seq_len(n) > n_drop
+      file_trees <- file_trees[keep_run]
+      file_lw <- file_lw[keep_run]
+    }
+
+    out_trees <- c(out_trees, file_trees)
+    out_lw <- c(out_lw, file_lw)
+    is_mcmc <- c(is_mcmc, mcmc)
   }
 
-  # Incremental printing (MCMC): one tree per line, all with equal weight
-  if (any(!is_summary)) {
-    inc <- jsonlite::parse_json(
-      paste0("[", paste(lines[!is_summary], collapse = ","), "]")
-    )
-    out_trees <- c(out_trees, inc)
-    out_lw <- c(out_lw, rep(0, length(inc)))
+  if (burnin > 0 && !all(is_mcmc)) {
+    cli::cli_inform(c(
+      "i" = paste(
+        "{.arg burnin} applies to MCMC runs only; it was ignored for",
+        "{.file {trees[!is_mcmc]}}."
+      )
+    ))
   }
 
   keep <- is.finite(out_lw)
@@ -928,7 +996,7 @@ tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
     cli::cli_abort(c(
       "No trees with a non-zero weight found in {.file {trees}}.",
       "i" = "Try more particles or iterations."
-    ), call = parent.frame())
+    ), call = call)
   }
 
   # A model may return an array of trees (e.g. MsgTree[]): use its one tree
@@ -1194,4 +1262,3 @@ tp_parse_hrm <- function(json_path, method = c("smc", "is", "mcmc")) {
   digits <- gsub("[^0-9]", "", sub("^[^[]*", "", reps))
   sort(unique(as.integer(strsplit(paste(digits, collapse = ""), "")[[1]])))
 }
-

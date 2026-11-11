@@ -160,18 +160,6 @@ tp_list <- function(...) {
 
 # Helper Functions ------------------------------------------------------------------
 
-#' Directory holding the downloaded TreePPL tarball
-#'
-#' @description
-#' `.install_dir()` builds the path of the directory, next to the local treepplr
-#' installation, where the tarball of the associated `tpplc` version is stored.
-#'
-#' @return A path (character string).
-#' @noRd
-.install_dir <- function() {
-  file.path(.libPaths()[[1]], "treeppl", TPPLC_VERSION)
-}
-
 #' Download the associated version of TreePPL
 #'
 #' @description
@@ -271,6 +259,18 @@ tp_list <- function(...) {
     wanted <- c(wanted, paste0("testdata_", model_name, ".", ext))
   }
   paths[basename(paths) %in% wanted]
+}
+
+#' Directory holding the downloaded TreePPL tarball
+#'
+#' @description
+#' `.install_dir()` builds the path of the directory, next to the local treepplr
+#' installation, where the tarball of the associated `tpplc` version is stored.
+#'
+#' @return A path (character string).
+#' @noRd
+.install_dir <- function() {
+  file.path(.libPaths()[[1]], "treeppl", TPPLC_VERSION)
 }
 
 #' Print the model library in the console
@@ -467,7 +467,6 @@ tp_open_tppl <- function(path) {
   }
 }
 
-
 # Printing Methods ----------------------------------------------------------------
 
 #' Print method for `tp_model_library` objects
@@ -486,10 +485,3 @@ print.tp_model_library <- function(x, ...) {
   .print_model_library(x)
   invisible(x)
 }
-
-
-
-
-
-
-

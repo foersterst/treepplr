@@ -1,84 +1,5 @@
 # Exported Functions ----------------------------------------------------------------
 
-#' TreePPL compiler options
-#'
-#' @description
-#' `tp_treeppl_options()` reads the inference methods and options supported by
-#' the TreePPL compiler (`tpplc --help`) and displays them in the console.
-#' Inference methods are passed to the `method` argument of [tp_sampler()],
-#' compile options to the `...` of [tp_sampler()], and runtime options to the
-#' `...` of [tp_run()].
-#'
-#' @details
-#' Options are shown in the form accepted by [tp_sampler()] and [tp_run()],
-#' with the type of value they expect. The type is translated from the
-#' placeholder used in `tpplc --help`:
-#' * `INT` or `N`: `<integer>`, e.g. `--subsample-size INT` is shown as
-#'   `subsample_size = <integer>`;
-#' * `FLOAT`: `<number>`;
-#' * any other placeholder (`ARG`, `FILE`, `<option>`, ...): `<string>`;
-#' * no placeholder (a flag without a value): `<logical>`, e.g.
-#'   `subsample = <logical>`. Use `TRUE` to set the flag.
-#'
-#' @param what Which information to show: `"all"` (inference methods, compile
-#'   options and runtime options), `"methods"`, `"compile"` or `"runtime"`.
-#'
-#' @return A data frame with columns `type` (`"methods"`, `"compile"` or
-#'   `"runtime"`), `argument`, `value` and `description` (invisibly). For
-#'   methods, `argument` is the method name (e.g., `"mcmc"`) and `value` is
-#'   `NA`; for options, `argument` is the argument name (e.g.,
-#'   `"subsample_size"`) and `value` the type of value expected: `"integer"`,
-#'   `"number"`, `"string"` or `"logical"` (flags without a value).
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' tp_treeppl_options("runtime")
-#'
-#' # the returned data frame can be searched
-#' opts <- tp_treeppl_options("compile")
-#' opts[grepl("resample", opts$argument), ]
-#' }
-tp_treeppl_options <- function(what = c("all", "methods", "compile", "runtime")) {
-  what <- match.arg(what)
-  type <- if (what == "all") names(.option_headers) else what
-  opts <- .tpplc_options(type)
-
-  # "--subsample-size INT" -> "subsample_size", "integer"
-  is_option <- opts$type != "methods"
-  opts$argument[is_option] <- gsub("-", "_", sub("^--", "", opts$argument[is_option]))
-  opts$value <- ifelse(is_option, .value_type(opts$value), NA_character_)
-
-  for (t in type) {
-    section <- opts[opts$type == t, ]
-    labels <- section$argument
-    if (t != "methods") {
-      labels <- paste0(labels, " = <", section$value, ">")
-    }
-    cli::cli_h1(.option_headers[[t]])
-    cli::cli_dl(stats::setNames(section$description, cli::col_yellow(labels)))
-  }
-
-  invisible(opts)
-}
-
-#' Write a custom model to tp_tempdir()
-#'
-#' @description
-#' `tp_write_model()` writes TreePPL code to a `.tppl` file in [tp_tempdir()].
-#'
-#' @param model A string containing the entire TreePPL code.
-#' @param model_file_name Name of the file to create, without extension.
-#'
-#' @return The path to the file created.
-#' @export
-tp_write_model <- function(model, model_file_name = "tmp_model_file") {
-  path <- paste0(tp_tempdir(), model_file_name, ".tppl")
-  writeLines(model, path)
-
-  path
-}
-
 #' Build a TreePPL sampler for a given model and inference method
 #'
 #' @description
@@ -175,8 +96,181 @@ tp_sampler <- function(model, method = "mcmc", print = TRUE, ...) {
   invisible(out)
 }
 
+#' TreePPL compiler options
+#'
+#' @description
+#' `tp_treeppl_options()` reads the inference methods and options supported by
+#' the TreePPL compiler (`tpplc --help`) and displays them in the console.
+#' Inference methods are passed to the `method` argument of [tp_sampler()],
+#' compile options to the `...` of [tp_sampler()], and runtime options to the
+#' `...` of [tp_run()].
+#'
+#' @details
+#' Options are shown in the form accepted by [tp_sampler()] and [tp_run()],
+#' with the type of value they expect. The type is translated from the
+#' placeholder used in `tpplc --help`:
+#' * `INT` or `N`: `<integer>`, e.g. `--subsample-size INT` is shown as
+#'   `subsample_size = <integer>`;
+#' * `FLOAT`: `<number>`;
+#' * any other placeholder (`ARG`, `FILE`, `<option>`, ...): `<string>`;
+#' * no placeholder (a flag without a value): `<logical>`, e.g.
+#'   `subsample = <logical>`. Use `TRUE` to set the flag.
+#'
+#' @param what Which information to show: `"all"` (inference methods, compile
+#'   options and runtime options), `"methods"`, `"compile"` or `"runtime"`.
+#'
+#' @return A data frame with columns `type` (`"methods"`, `"compile"` or
+#'   `"runtime"`), `argument`, `value` and `description` (invisibly). For
+#'   methods, `argument` is the method name (e.g., `"mcmc"`) and `value` is
+#'   `NA`; for options, `argument` is the argument name (e.g.,
+#'   `"subsample_size"`) and `value` the type of value expected: `"integer"`,
+#'   `"number"`, `"string"` or `"logical"` (flags without a value).
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' tp_treeppl_options("runtime")
+#'
+#' # the returned data frame can be searched
+#' opts <- tp_treeppl_options("compile")
+#' opts[grepl("resample", opts$argument), ]
+#' }
+tp_treeppl_options <- function(what = c("all", "methods", "compile", "runtime")) {
+  what <- match.arg(what)
+  type <- if (what == "all") names(.option_headers) else what
+  opts <- .tpplc_options(type)
+
+  # "--subsample-size INT" -> "subsample_size", "integer"
+  is_option <- opts$type != "methods"
+  opts$argument[is_option] <- gsub("-", "_", sub("^--", "", opts$argument[is_option]))
+  opts$value <- ifelse(is_option, .value_type(opts$value), NA_character_)
+
+  for (t in type) {
+    section <- opts[opts$type == t, ]
+    labels <- section$argument
+    if (t != "methods") {
+      labels <- paste0(labels, " = <", section$value, ">")
+    }
+    cli::cli_h1(.option_headers[[t]])
+    cli::cli_dl(stats::setNames(section$description, cli::col_yellow(labels)))
+  }
+
+  invisible(opts)
+}
+
+#' Write a custom model to tp_tempdir()
+#'
+#' @description
+#' `tp_write_model()` writes TreePPL code to a `.tppl` file in [tp_tempdir()].
+#'
+#' @param model A string containing the entire TreePPL code.
+#' @param model_file_name Name of the file to create, without extension.
+#'
+#' @return The path to the file created.
+#' @export
+tp_write_model <- function(model, model_file_name = "tmp_model_file") {
+  path <- paste0(tp_tempdir(), model_file_name, ".tppl")
+  writeLines(model, path)
+
+  path
+}
 
 # Helper Functions ------------------------------------------------------------------
+
+#' Compile a TreePPL model
+#'
+#' @description
+#' `.compilation()` compiles a TreePPL model with `tpplc`. The executable is
+#' named after a hash of the model path and options, and stored in
+#' [tp_tempdir()].
+#'
+#' @param path Path to a TreePPL model file.
+#' @param args_str String with the options for the TreePPL compiler.
+#' @param call Environment used in the error message if compilation fails.
+#'
+#' @return The path to the compiled TreePPL program.
+#' @noRd
+.compilation <- function(path, args_str, call = rlang::caller_env()) {
+  hash <- digest::digest(paste(path, args_str), algo = "sha256")
+  output_path <- paste0(tp_tempdir(), hash, ".exe")
+
+  output <- .tpplc(
+    c(args_str, "--output", shQuote(output_path), shQuote(path)),
+    stdout = TRUE,
+    stderr = TRUE
+  )
+  status <- attr(output, "status")
+  # the output is shown as-is, so braces must not be read as cli interpolation
+  message <- gsub("}", "}}", gsub("{", "{{", output, fixed = TRUE), fixed = TRUE)
+  names(message) <- rep(" ", length(message))
+
+  if (!is.null(status) && status != 0L) {
+    cli::cli_abort(c(
+      "Compilation failed: {.code tpplc} exited with status {status}.",
+      "i" = "Command: {.code tpplc {args_str}}",
+      if (length(message) > 0) c("x" = "{.code tpplc} said:", message)
+    ), call = call)
+  }
+
+  # compiler messages are captured above, so they are shown here instead
+  if (length(message) > 0) {
+    cli::cli_inform(message)
+  }
+
+  output_path
+}
+
+#' Separate compile and runtime options
+#'
+#' @description
+#' `.list_to_options()` splits a list of options in compile options (`method`
+#' and the compile options listed by `tpplc`) and remaining options, which are
+#' assumed to be runtime options. Names may use underscores or hyphens
+#' (`no_early_stop` or `no-early-stop`) and are kept as given. If an option is
+#' not valid, `tpplc` will complain.
+#'
+#' @param user_list A named list of options.
+#'
+#' @return A list with elements `compile` and `runtime`.
+#' @noRd
+.list_to_options <- function(user_list) {
+  compile_flags <- .tpplc_options("compile")$argument
+  user_flags <- gsub("_", "-", names(user_list))
+  is_compile <- user_flags %in% c("method", sub("^--", "", compile_flags))
+
+  list(compile = user_list[is_compile], runtime = user_list[!is_compile])
+}
+
+#' Convert options to command-line flags
+#'
+#' @description
+#' `.options_to_string()` converts a named list of options to a string of
+#' flags: `--name value` for most options, and `--name` for `TRUE` options.
+#' `FALSE` and `NULL` options are dropped. Underscores in names are converted
+#' to hyphens (e.g., `no_early_stop` becomes `--no-early-stop`).
+#'
+#' @param options A named list of options.
+#'
+#' @return A string.
+#' @noRd
+.options_to_string <- function(options) {
+  names(options) <- gsub("_", "-", names(options))
+
+  to_flag <- function(name, value) {
+    if (is.null(value) || isFALSE(value)) {
+      NA_character_
+    } else if (isTRUE(value)) {
+      paste0("--", name)
+    } else {
+      # no scientific notation (e.g., 1e+05), which tpplc cannot read
+      value <- format(value, scientific = FALSE, trim = TRUE, digits = 15)
+      paste0("--", name, " ", value)
+    }
+  }
+
+  flags <- unlist(Map(to_flag, names(options), options))
+  paste(flags[!is.na(flags)], collapse = " ")
+}
 
 #' Section headers of the TreePPL help text
 #'
@@ -189,28 +283,6 @@ tp_sampler <- function(model, method = "mcmc", print = TRUE, ...) {
   compile = "Compile options",
   runtime = "Runtime options"
 )
-
-#' Translate TreePPL value placeholders to R types
-#'
-#' @description
-#' `.value_type()` translates the placeholders that `tpplc --help` uses for
-#' option values to the R type expected by [tp_sampler()] and [tp_run()]:
-#' `INT` and `N` to `"integer"`, `FLOAT` to `"number"`, no placeholder (a flag
-#' without a value) to `"logical"`, and any other placeholder (`ARG`, `FILE`,
-#' `<option>`, ...) to `"string"`.
-#'
-#' @param placeholder Character vector of placeholders, `""` for none.
-#'
-#' @return A character vector of the same length as `placeholder`.
-#' @noRd
-.value_type <- function(placeholder) {
-  numeric_types <- c(INT = "integer", N = "integer", FLOAT = "numeric")
-
-  type <- unname(numeric_types[placeholder])
-  type[is.na(type)] <- "character"
-  type[placeholder == ""] <- "logical"
-  type
-}
 
 #' TreePPL sampler class
 #'
@@ -313,101 +385,27 @@ tp_sampler <- function(model, method = "mcmc", print = TRUE, ...) {
   do.call(rbind, sections)
 }
 
-#' Separate compile and runtime options
+#' Translate TreePPL value placeholders to R types
 #'
 #' @description
-#' `.list_to_options()` splits a list of options in compile options (`method`
-#' and the compile options listed by `tpplc`) and remaining options, which are
-#' assumed to be runtime options. Names may use underscores or hyphens
-#' (`no_early_stop` or `no-early-stop`) and are kept as given. If an option is
-#' not valid, `tpplc` will complain.
+#' `.value_type()` translates the placeholders that `tpplc --help` uses for
+#' option values to the R type expected by [tp_sampler()] and [tp_run()]:
+#' `INT` and `N` to `"integer"`, `FLOAT` to `"number"`, no placeholder (a flag
+#' without a value) to `"logical"`, and any other placeholder (`ARG`, `FILE`,
+#' `<option>`, ...) to `"string"`.
 #'
-#' @param user_list A named list of options.
+#' @param placeholder Character vector of placeholders, `""` for none.
 #'
-#' @return A list with elements `compile` and `runtime`.
+#' @return A character vector of the same length as `placeholder`.
 #' @noRd
-.list_to_options <- function(user_list) {
-  compile_flags <- .tpplc_options("compile")$argument
-  user_flags <- gsub("_", "-", names(user_list))
-  is_compile <- user_flags %in% c("method", sub("^--", "", compile_flags))
+.value_type <- function(placeholder) {
+  numeric_types <- c(INT = "integer", N = "integer", FLOAT = "numeric")
 
-  list(compile = user_list[is_compile], runtime = user_list[!is_compile])
+  type <- unname(numeric_types[placeholder])
+  type[is.na(type)] <- "character"
+  type[placeholder == ""] <- "logical"
+  type
 }
-
-#' Convert options to command-line flags
-#'
-#' @description
-#' `.options_to_string()` converts a named list of options to a string of
-#' flags: `--name value` for most options, and `--name` for `TRUE` options.
-#' `FALSE` and `NULL` options are dropped. Underscores in names are converted
-#' to hyphens (e.g., `no_early_stop` becomes `--no-early-stop`).
-#'
-#' @param options A named list of options.
-#'
-#' @return A string.
-#' @noRd
-.options_to_string <- function(options) {
-  names(options) <- gsub("_", "-", names(options))
-
-  to_flag <- function(name, value) {
-    if (is.null(value) || isFALSE(value)) {
-      NA_character_
-    } else if (isTRUE(value)) {
-      paste0("--", name)
-    } else {
-      # no scientific notation (e.g., 1e+05), which tpplc cannot read
-      value <- format(value, scientific = FALSE, trim = TRUE, digits = 15)
-      paste0("--", name, " ", value)
-    }
-  }
-
-  flags <- unlist(Map(to_flag, names(options), options))
-  paste(flags[!is.na(flags)], collapse = " ")
-}
-
-#' Compile a TreePPL model
-#'
-#' @description
-#' `.compilation()` compiles a TreePPL model with `tpplc`. The executable is
-#' named after a hash of the model path and options, and stored in
-#' [tp_tempdir()].
-#'
-#' @param path Path to a TreePPL model file.
-#' @param args_str String with the options for the TreePPL compiler.
-#' @param call Environment used in the error message if compilation fails.
-#'
-#' @return The path to the compiled TreePPL program.
-#' @noRd
-.compilation <- function(path, args_str, call = rlang::caller_env()) {
-  hash <- digest::digest(paste(path, args_str), algo = "sha256")
-  output_path <- paste0(tp_tempdir(), hash, ".exe")
-
-  output <- .tpplc(
-    c(args_str, "--output", shQuote(output_path), shQuote(path)),
-    stdout = TRUE,
-    stderr = TRUE
-  )
-  status <- attr(output, "status")
-  # the output is shown as-is, so braces must not be read as cli interpolation
-  message <- gsub("}", "}}", gsub("{", "{{", output, fixed = TRUE), fixed = TRUE)
-  names(message) <- rep(" ", length(message))
-
-  if (!is.null(status) && status != 0L) {
-    cli::cli_abort(c(
-      "Compilation failed: {.code tpplc} exited with status {status}.",
-      "i" = "Command: {.code tpplc {args_str}}",
-      if (length(message) > 0) c("x" = "{.code tpplc} said:", message)
-    ), call = call)
-  }
-
-  # compiler messages are captured above, so they are shown here instead
-  if (length(message) > 0) {
-    cli::cli_inform(message)
-  }
-
-  output_path
-}
-
 
 # Printing Methods ------------------------------------------------------------------
 

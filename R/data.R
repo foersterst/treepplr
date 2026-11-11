@@ -58,8 +58,8 @@
 #'   model = "crbd",
 #'   data = list(tree = tp_phylo_to_tpPhylo(phy), rho = 0.5)
 #' )
-#' d            # prints the summary again
-#' d$data_path  # path to the JSON file
+#' d # prints the summary again
+#' d$data_path # path to the JSON file
 #'
 #' # Write to a chosen file, without the check or the summary
 #' d <- tp_data(
@@ -521,61 +521,28 @@ tp_input_check <- function(json, tppl) {
   invisible(tppl)
 }
 
-#' Read a `.tppl` file as one string, without comments
-#'
-#' Removes `/* ... */` block comments and `// ...` line comments so that
-#' commented-out code is never parsed.
+#' List a `.tppl` file and every `.tppl` file it imports (relative paths)
 #' @noRd
-.read_tppl_code <- function(tppl) {
-  code <- paste(readLines(tppl, warn = FALSE), collapse = "\n")
-  code <- gsub("(?s)/\\*.*?\\*/", " ", code, perl = TRUE) # (?s): span lines
-  gsub("//[^\n]*", "", code, perl = TRUE)
-}
-
-#' Parse the `model function` signature of a TreePPL model
-#'
-#' @return A list with `name` (model function name) and `args`, a data frame
-#'   with columns `name` and `type`.
-#' @noRd
-.parse_model_signature <- function(code, tppl) {
-  pattern <- "model\\s+function\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\("
-  hits <- gregexpr(pattern, code, perl = TRUE)[[1]]
-
-  if (hits[1] == -1) {
-    cli::cli_abort("No {.code model function} found in {.file {tppl}}.")
+.collect_tppl_files <- function(tppl, seen = character(0)) {
+  tppl <- normalizePath(tppl, mustWork = FALSE)
+  if (tppl %in% seen || !file.exists(tppl)) {
+    return(seen)
   }
-  if (length(hits) > 1) {
-    cli::cli_warn(
-      "{.file {tppl}} has {length(hits)} model functions; using the first."
-    )
+  seen <- c(seen, tppl)
+
+  code <- .read_tppl_code(tppl)
+  imports <- regmatches(
+    code,
+    gregexpr('import\\s+"([^"]+)"', code, perl = TRUE)
+  )[[1]]
+  imports <- sub('import\\s+"([^"]+)"', "\\1", imports, perl = TRUE)
+  imports <- imports[!grepl("::", imports) & grepl("\\.tppl$", imports)]
+
+  for (path in file.path(dirname(tppl), imports)) {
+    seen <- .collect_tppl_files(path, seen)
   }
 
-  header <- regmatches(code, regexpr(pattern, code, perl = TRUE))
-  name <- sub(pattern, "\\1", header, perl = TRUE)
-
-  # Text between the opening "(" and its matching ")"
-  open_at <- hits[1] + attr(hits, "match.length")[1] - 1
-  inside <- .extract_balanced(code, open_at)
-
-  pieces <- .split_top_level(inside, sep = ",")
-  pieces <- pieces[pieces != ""]
-
-  arg_pattern <- "^([A-Za-z_][A-Za-z0-9_]*)\\s*:\\s*(.+)$"
-  bad <- !grepl(arg_pattern, pieces, perl = TRUE)
-  if (any(bad)) {
-    cli::cli_abort(c(
-      "Can't read the arguments of {.fn {name}} in {.file {tppl}}.",
-      "x" = "Unexpected argument{?s}: {.code {pieces[bad]}}"
-    ))
-  }
-
-  args <- data.frame(
-    name = sub(arg_pattern, "\\1", pieces, perl = TRUE),
-    type = gsub("\\s+", "", sub(arg_pattern, "\\2", pieces, perl = TRUE)),
-    stringsAsFactors = FALSE
-  )
-
-  list(name = name, args = args)
+  seen
 }
 
 #' Return the text between a bracket at position `open_at` and its partner
@@ -595,29 +562,6 @@ tp_input_check <- function(json, tppl) {
     return("") # "()" -> a model without arguments
   }
   paste(chars[2:(end - 1)], collapse = "")
-}
-
-#' Split a string at `sep`, ignoring separators inside (), [] or {}
-#' @noRd
-.split_top_level <- function(text, sep = ",") {
-  chars <- strsplit(text, "")[[1]]
-  depth <- 0
-  pieces <- character(0)
-  current <- ""
-
-  for (ch in chars) {
-    if (ch %in% c("(", "[", "{")) depth <- depth + 1
-    if (ch %in% c(")", "]", "}")) depth <- depth - 1
-
-    if (ch == sep && depth == 0) {
-      pieces <- c(pieces, current)
-      current <- ""
-    } else {
-      current <- paste0(current, ch)
-    }
-  }
-
-  trimws(c(pieces, current))
 }
 
 #' Find the names of all tree types visible to a model file
@@ -670,28 +614,121 @@ tp_input_check <- function(json, tppl) {
   unique(tree_types)
 }
 
-#' List a `.tppl` file and every `.tppl` file it imports (relative paths)
+#' Parse the `model function` signature of a TreePPL model
+#'
+#' @return A list with `name` (model function name) and `args`, a data frame
+#'   with columns `name` and `type`.
 #' @noRd
-.collect_tppl_files <- function(tppl, seen = character(0)) {
-  tppl <- normalizePath(tppl, mustWork = FALSE)
-  if (tppl %in% seen || !file.exists(tppl)) {
-    return(seen)
+.parse_model_signature <- function(code, tppl) {
+  pattern <- "model\\s+function\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\("
+  hits <- gregexpr(pattern, code, perl = TRUE)[[1]]
+
+  if (hits[1] == -1) {
+    cli::cli_abort("No {.code model function} found in {.file {tppl}}.")
   }
-  seen <- c(seen, tppl)
-
-  code <- .read_tppl_code(tppl)
-  imports <- regmatches(
-    code,
-    gregexpr('import\\s+"([^"]+)"', code, perl = TRUE)
-  )[[1]]
-  imports <- sub('import\\s+"([^"]+)"', "\\1", imports, perl = TRUE)
-  imports <- imports[!grepl("::", imports) & grepl("\\.tppl$", imports)]
-
-  for (path in file.path(dirname(tppl), imports)) {
-    seen <- .collect_tppl_files(path, seen)
+  if (length(hits) > 1) {
+    cli::cli_warn(
+      "{.file {tppl}} has {length(hits)} model functions; using the first."
+    )
   }
 
-  seen
+  header <- regmatches(code, regexpr(pattern, code, perl = TRUE))
+  name <- sub(pattern, "\\1", header, perl = TRUE)
+
+  # Text between the opening "(" and its matching ")"
+  open_at <- hits[1] + attr(hits, "match.length")[1] - 1
+  inside <- .extract_balanced(code, open_at)
+
+  pieces <- .split_top_level(inside, sep = ",")
+  pieces <- pieces[pieces != ""]
+
+  arg_pattern <- "^([A-Za-z_][A-Za-z0-9_]*)\\s*:\\s*(.+)$"
+  bad <- !grepl(arg_pattern, pieces, perl = TRUE)
+  if (any(bad)) {
+    cli::cli_abort(c(
+      "Can't read the arguments of {.fn {name}} in {.file {tppl}}.",
+      "x" = "Unexpected argument{?s}: {.code {pieces[bad]}}"
+    ))
+  }
+
+  args <- data.frame(
+    name = sub(arg_pattern, "\\1", pieces, perl = TRUE),
+    type = gsub("\\s+", "", sub(arg_pattern, "\\2", pieces, perl = TRUE)),
+    stringsAsFactors = FALSE
+  )
+
+  list(name = name, args = args)
+}
+
+#' Read the top-level field names of a JSON input file
+#'
+#' Stops with a clear message if the file is missing, is not valid JSON, or
+#' holds an array instead of an object. `{}` and `[]` give zero fields.
+#' @noRd
+.read_json_fields <- function(json, call = parent.frame()) {
+  if (!is.character(json) || length(json) != 1 || is.na(json)) {
+    cli::cli_abort("{.arg json} must be a single file path.", call = call)
+  }
+  if (!file.exists(json)) {
+    cli::cli_abort("Can't find the JSON file {.file {json}}.", call = call)
+  }
+
+  input <- tryCatch(
+    jsonlite::read_json(json, simplifyVector = FALSE),
+    error = function(e) {
+      reason <- conditionMessage(e)
+      cli::cli_abort(
+        c("Can't read {.file {json}} as JSON.", "x" = "{reason}"),
+        call = call
+      )
+    }
+  )
+
+  if (length(input) > 0 && is.null(names(input))) {
+    cli::cli_abort(
+      c(
+        "{.file {json}} must contain a JSON object, {.code {{...}}}.",
+        "x" = "It contains an array, {.code [...]}, instead."
+      ),
+      call = call
+    )
+  }
+
+  if (is.null(names(input))) character(0) else names(input)
+}
+
+#' Read a `.tppl` file as one string, without comments
+#'
+#' Removes `/* ... */` block comments and `// ...` line comments so that
+#' commented-out code is never parsed.
+#' @noRd
+.read_tppl_code <- function(tppl) {
+  code <- paste(readLines(tppl, warn = FALSE), collapse = "\n")
+  code <- gsub("(?s)/\\*.*?\\*/", " ", code, perl = TRUE) # (?s): span lines
+  gsub("//[^\n]*", "", code, perl = TRUE)
+}
+
+#' Split a string at `sep`, ignoring separators inside (), [] or {}
+#' @noRd
+.split_top_level <- function(text, sep = ",") {
+  chars <- strsplit(text, "")[[1]]
+  depth <- 0
+  pieces <- character(0)
+  current <- ""
+
+  for (ch in chars) {
+    if (ch %in% c("(", "[", "{")) depth <- depth + 1
+    if (ch %in% c(")", "]", "}")) depth <- depth - 1
+
+    if (ch == sep && depth == 0) {
+      pieces <- c(pieces, current)
+      current <- ""
+    } else {
+      current <- paste0(current, ch)
+    }
+  }
+
+  trimws(c(pieces, current))
 }
 
 #' Translate a TreePPL type into the R object a user should supply
@@ -749,43 +786,6 @@ tp_input_check <- function(json, tppl) {
   if (n_dims == 0) base else paste("list of", base)
 }
 
-#' Read the top-level field names of a JSON input file
-#'
-#' Stops with a clear message if the file is missing, is not valid JSON, or
-#' holds an array instead of an object. `{}` and `[]` give zero fields.
-#' @noRd
-.read_json_fields <- function(json, call = parent.frame()) {
-  if (!is.character(json) || length(json) != 1 || is.na(json)) {
-    cli::cli_abort("{.arg json} must be a single file path.", call = call)
-  }
-  if (!file.exists(json)) {
-    cli::cli_abort("Can't find the JSON file {.file {json}}.", call = call)
-  }
-
-  input <- tryCatch(
-    jsonlite::read_json(json, simplifyVector = FALSE),
-    error = function(e) {
-      reason <- conditionMessage(e)
-      cli::cli_abort(
-        c("Can't read {.file {json}} as JSON.", "x" = "{reason}"),
-        call = call
-      )
-    }
-  )
-
-  if (length(input) > 0 && is.null(names(input))) {
-    cli::cli_abort(
-      c(
-        "{.file {json}} must contain a JSON object, {.code {{...}}}.",
-        "x" = "It contains an array, {.code [...]}, instead."
-      ),
-      call = call
-    )
-  }
-
-  if (is.null(names(input))) character(0) else names(input)
-}
-
 #' Summarise a TreePPL tree by walking it once
 #'
 #' Collects the number of tips and internal nodes, the root age, the range of
@@ -834,6 +834,39 @@ tp_input_check <- function(json, tppl) {
 }
 
 # Printing Methods ------------------------------------------------------------------
+
+#' Print the JSON input of a TreePPL model
+#'
+#' Console method for objects returned by [tp_data()]. It shows the path to
+#' the JSON file, the model name and the arguments written to the file, with
+#' the R object each one was built from.
+#'
+#' @param x An object of class `tpData`.
+#' @param ... Not used; present for compatibility with [print()].
+#'
+#' @return `x`, invisibly.
+#'
+#' @keywords internal
+#'
+#' @export
+print.tpData <- function(x, ...) {
+  cli::cli_h2("Data Input")
+  cli::cli_text("Data file: {.path {x$data_path}}")
+  cli::cli_text("Model: {.val {x$model_name}}")
+
+  if (length(x$expect_args) == 0) {
+    cli::cli_text(
+      "Expected arguments: none (write an empty JSON object, {.code {{}}})"
+    )
+    return(invisible(x))
+  }
+
+  lines <- cli::col_cyan(paste0(x$expect_args, " (", x$expect_class, ")"))
+  cli::cli_text("Arguments: {lines}")
+  cli::cli_end()
+
+  invisible(x)
+}
 
 #' Print the expected input of a TreePPL model
 #'
@@ -914,39 +947,6 @@ print.tpIcheck <- function(x, ...) {
   invisible(x)
 }
 
-#' Print the JSON input of a TreePPL model
-#'
-#' Console method for objects returned by [tp_data()]. It shows the path to
-#' the JSON file, the model name and the arguments written to the file, with
-#' the R object each one was built from.
-#'
-#' @param x An object of class `tpData`.
-#' @param ... Not used; present for compatibility with [print()].
-#'
-#' @return `x`, invisibly.
-#'
-#' @keywords internal
-#'
-#' @export
-print.tpData <- function(x, ...) {
-  cli::cli_h2("Data Input")
-  cli::cli_text("Data file: {.path {x$data_path}}")
-  cli::cli_text("Model: {.val {x$model_name}}")
-
-  if (length(x$expect_args) == 0) {
-    cli::cli_text(
-      "Expected arguments: none (write an empty JSON object, {.code {{}}})"
-    )
-    return(invisible(x))
-  }
-
-  lines <- cli::col_cyan(paste0(x$expect_args, " (", x$expect_class, ")"))
-  cli::cli_text("Arguments: {lines}")
-  cli::cli_end()
-
-  invisible(x)
-}
-
 #' Print a TreePPL tree
 #'
 #' Console method for objects returned by [tp_phylo_to_tpPhylo()]. Like ape's
@@ -974,4 +974,3 @@ print.tpPhylo <- function(x, ...) {
 
   invisible(x)
 }
-

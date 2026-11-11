@@ -413,6 +413,138 @@ tp_summarise_trees <- function(
 
 # Helper Functions ------------------------------------------------------------------
 
+#' Weighted mean, median and HPD interval of a set of ages
+#'
+#' The HPD interval is the shortest interval of sorted ages whose weights sum
+#' to at least `level`.
+#' @return A named vector: `mean`, `median`, `lower`, `upper`, `n`.
+#' @noRd
+.age_stats <- function(x, w, level = 0.95) {
+  o <- order(x)
+  x <- x[o]
+  w <- w[o]
+  if (sum(w) <= 0) w <- rep(1, length(w))
+  w <- w / sum(w)
+  cw <- cumsum(w)
+  tol <- 1e-12
+
+  # for each start i, the first end j with weight(x[i..j]) >= level
+  end <- findInterval(cw - w + level - tol, cw, left.open = TRUE) + 1L
+  ok <- end <= length(x)
+  start <- which(ok)
+  best <- start[which.min(x[end[ok]] - x[start])]
+
+  c(
+    mean = sum(w * x),
+    median = x[which(cw >= 0.5 - tol)[1]],
+    lower = x[best],
+    upper = x[end[best]],
+    n = length(x)
+  )
+}
+
+#' as.numeric() without warnings ("nan", "-inf" become NaN, -Inf)
+#' @noRd
+.as_num <- function(x) {
+  suppressWarnings(as.numeric(x))
+}
+
+#' Bind lists of equal-named columns into one tibble
+#'
+#' Faster than rbind() on many data frames: each column is combined once.
+#' @noRd
+.bind_columns <- function(parts) {
+  cols <- names(parts[[1]])
+  out <- lapply(cols, function(col) {
+    pieces <- lapply(parts, `[[`, col)
+    if (all(vapply(pieces, is.atomic, logical(1)))) {
+      unlist(pieces, use.names = FALSE)
+    } else {
+      do.call(c, lapply(pieces, as.list))
+    }
+  })
+  names(out) <- cols
+  tibble::as_tibble(out)
+}
+
+#' Warn when summarised node ages give negative branch lengths
+#'
+#' Can only happen with method = "MCC", where a parent and its child are
+#' averaged over different sets of trees.
+#' @noRd
+.check_branch_lengths <- function(trees, call = parent.frame()) {
+  n_neg <- vapply(trees, function(t) sum(t$edge.length < 0), numeric(1))
+  if (sum(n_neg) == 0) {
+    return(invisible())
+  }
+  n_trees <- sum(n_neg > 0)
+  cli::cli_warn(c(
+    "{sum(n_neg)} branch{?es} in {n_trees} summary tree{?s} {?has/have} a negative length.",
+    "i" = paste(
+      "A child clade came out older than its parent: the clades involved",
+      "probably have low support (see {.field node_summary})."
+    ),
+    "i" = "Try {.code method = \"MAP\"} or more samples."
+  ), call = call)
+}
+
+#' Check the `samples`, `random` and `burnin` arguments of
+#' tp_summarise_trees()
+#' @noRd
+.check_summary_args <- function(
+  samples,
+  random,
+  burnin,
+  call = parent.frame()
+) {
+  is_count <- is.numeric(samples) && length(samples) == 1 &&
+    isTRUE(samples >= 1 && samples == round(samples))
+  if (!is_count) {
+    cli::cli_abort(
+      "{.arg samples} must be a single positive whole number.",
+      call = call
+    )
+  }
+  if (!isTRUE(random) && !isFALSE(random)) {
+    cli::cli_abort(
+      "{.arg random} must be {.code TRUE} or {.code FALSE}.",
+      call = call
+    )
+  }
+  is_burnin <- is.numeric(burnin) && length(burnin) == 1 &&
+    isTRUE(burnin >= 0) && (burnin < 1 || burnin == round(burnin))
+  if (!is_burnin) {
+    cli::cli_abort(c(
+      "{.arg burnin} must be a fraction in [0, 1) or a whole number of iterations.",
+      "x" = "You supplied {.val {burnin}}."
+    ), call = call)
+  }
+}
+
+#' Remove the bodies of functions defined inside a model body
+#'
+#' Anonymous functions (`function(x: Int) => Real { ... }`) have their own
+#' `return` statements, which are not the model's return value.
+#' @noRd
+.drop_inner_functions <- function(body) {
+  repeat {
+    at <- regexpr("\\bfunction\\s*\\(", body, perl = TRUE)
+    if (at == -1) {
+      return(body)
+    }
+    open <- regexpr("{", substring(body, at), fixed = TRUE)
+    if (open == -1) {
+      return(body)
+    }
+    open <- at + open - 1
+    inner <- .extract_balanced(body, open, open = "{", close = "}")
+    body <- paste0(
+      substr(body, 1, at - 1), "NULL",
+      substring(body, open + nchar(inner) + 2)
+    )
+  }
+}
+
 #' Remove fields from TreePPL output lines before they are parsed
 #'
 #' Each field in `exclude` is removed wherever it appears, whatever its value:
@@ -456,43 +588,56 @@ tp_summarise_trees <- function(
   lines
 }
 
-#' Rename the x1, x2, ... columns after the values the model returns
+#' Spread list-columns of numeric vectors into one column per element
 #'
-#' Only unnamed parameter columns (`x1`, `x2`, ...) are renamed, and only when
-#' the model's `return` statement gives exactly one name per column; otherwise
-#' the columns are kept as they are, with a message saying why.
+#' A list-column whose values are all vectors of numbers of the same length k
+#' (k >= 2) becomes k numeric columns, `<name>_1`, ..., `<name>_<k>`, in the
+#' same place. Columns holding trees, records or vectors of different
+#' lengths are kept as they are.
 #' @noRd
-.name_parameters <- function(df, model) {
-  if (is.null(model)) {
-    return(df)
+.expand_vector_columns <- function(cols) {
+  expanded <- lapply(names(cols), function(name) {
+    col <- cols[[name]]
+    if (!is.list(col)) {
+      return(stats::setNames(list(col), name))
+    }
+    k <- unique(lengths(col))
+    if (length(k) != 1 || k < 2) {
+      return(stats::setNames(list(col), name))
+    }
+    items <- unlist(col, recursive = FALSE, use.names = FALSE)
+    if (any(lengths(items) != 1) || any(vapply(items, is.list, logical(1)))) {
+      return(stats::setNames(list(col), name)) # e.g. trees or records
+    }
+    values <- unlist(items, use.names = FALSE)
+    if (is.character(values)) values <- .as_num(values)
+    mat <- matrix(values, ncol = k, byrow = TRUE)
+    stats::setNames(
+      lapply(seq_len(k), function(j) mat[, j]),
+      paste0(name, "_", seq_len(k))
+    )
+  })
+  unlist(expanded, recursive = FALSE)
+}
+
+#' Text of the `model function` body, between its `{` and matching `}`
+#' @noRd
+.model_body <- function(code) {
+  pattern <- "model\\s+function\\s+[A-Za-z_][A-Za-z0-9_]*\\s*\\("
+  start <- regexpr(pattern, code, perl = TRUE)
+  if (start == -1) {
+    return(NULL)
   }
 
-  x_cols <- grep("^x[0-9]+$", names(df), value = TRUE)
-  if (length(x_cols) == 0) {
-    return(df) # parameters are already named (records)
+  # skip the argument list, then take the first block after it
+  open_args <- start + attr(start, "match.length") - 1
+  args <- .extract_balanced(code, open_args)
+  after_args <- open_args + nchar(args) + 2
+  open_body <- regexpr("{", substring(code, after_args), fixed = TRUE)
+  if (open_body == -1) {
+    return(NULL)
   }
-
-  tppl <- .model_path(model)
-  if (is.null(tppl)) {
-    cli::cli_inform(c(
-      "i" = "Can't find model {.val {model}}; keeping columns {.field {x_cols}}."
-    ))
-    return(df)
-  }
-
-  par_names <- .model_return_names(tppl)
-  if (is.null(par_names) || length(par_names) != length(x_cols)) {
-    cli::cli_inform(c(
-      "i" = paste(
-        "Can't name the parameters from the {.code return} statement of",
-        "{.file {tppl}}; keeping columns {.field {x_cols}}."
-      )
-    ))
-    return(df)
-  }
-
-  names(df)[match(x_cols, names(df))] <- par_names
-  df
+  .extract_balanced(code, after_args + open_body - 1, open = "{", close = "}")
 }
 
 #' Path to a model's .tppl file, from a path or a model-library name
@@ -549,68 +694,6 @@ tp_summarise_trees <- function(
   make.unique(name_sets[[1]], sep = "_")
 }
 
-#' Text of the `model function` body, between its `{` and matching `}`
-#' @noRd
-.model_body <- function(code) {
-  pattern <- "model\\s+function\\s+[A-Za-z_][A-Za-z0-9_]*\\s*\\("
-  start <- regexpr(pattern, code, perl = TRUE)
-  if (start == -1) {
-    return(NULL)
-  }
-
-  # skip the argument list, then take the first block after it
-  open_args <- start + attr(start, "match.length") - 1
-  args <- .extract_balanced(code, open_args)
-  after_args <- open_args + nchar(args) + 2
-  open_body <- regexpr("{", substring(code, after_args), fixed = TRUE)
-  if (open_body == -1) {
-    return(NULL)
-  }
-  .extract_balanced(code, after_args + open_body - 1, open = "{", close = "}")
-}
-
-#' Remove the bodies of functions defined inside a model body
-#'
-#' Anonymous functions (`function(x: Int) => Real { ... }`) have their own
-#' `return` statements, which are not the model's return value.
-#' @noRd
-.drop_inner_functions <- function(body) {
-  repeat {
-    at <- regexpr("\\bfunction\\s*\\(", body, perl = TRUE)
-    if (at == -1) {
-      return(body)
-    }
-    open <- regexpr("{", substring(body, at), fixed = TRUE)
-    if (open == -1) {
-      return(body)
-    }
-    open <- at + open - 1
-    inner <- .extract_balanced(body, open, open = "{", close = "}")
-    body <- paste0(
-      substr(body, 1, at - 1), "NULL",
-      substring(body, open + nchar(inner) + 2)
-    )
-  }
-}
-
-#' The expressions of all `return` statements in a (function-free) body
-#' @noRd
-.return_expressions <- function(body) {
-  hits <- gregexpr("\\breturn\\b", body, perl = TRUE)[[1]]
-  if (hits[1] == -1) {
-    return(character(0))
-  }
-  vapply(hits, function(at) {
-    rest <- strsplit(substring(body, at + 6), "")[[1]]
-    # the expression runs to the first ";" outside brackets
-    depth <- cumsum(rest %in% c("(", "[", "{")) -
-      cumsum(rest %in% c(")", "]", "}"))
-    end <- which(rest == ";" & depth == 0)[1]
-    if (is.na(end)) end <- length(rest) + 1
-    trimws(paste(rest[seq_len(end - 1)], collapse = ""))
-  }, character(1))
-}
-
 #' Names for the values of one return expression, or NULL
 #' @noRd
 .names_from_return <- function(expr) {
@@ -640,21 +723,83 @@ tp_summarise_trees <- function(
   vapply(seq_along(items), function(i) .value_name(items[i], i), character(1))
 }
 
-#' A name for one returned value: the variable, the argument of a one-argument
-#' call, or `x<i>` for anything else
+#' Rename the x1, x2, ... columns after the values the model returns
+#'
+#' Only unnamed parameter columns (`x1`, `x2`, ...) are renamed, and only when
+#' the model's `return` statement gives exactly one name per column; otherwise
+#' the columns are kept as they are, with a message saying why.
 #' @noRd
-.value_name <- function(item, i) {
-  ident <- "[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*"
-  item <- trimws(item)
+.name_parameters <- function(df, model) {
+  if (is.null(model)) {
+    return(df)
+  }
 
-  if (grepl(paste0("^", ident, "$"), item, perl = TRUE)) {
-    return(item)
+  x_cols <- grep("^x[0-9]+$", names(df), value = TRUE)
+  if (length(x_cols) == 0) {
+    return(df) # parameters are already named (records)
   }
-  call <- paste0("^[A-Za-z_][A-Za-z0-9_]*\\s*\\(\\s*(", ident, ")\\s*\\)$")
-  if (grepl(call, item, perl = TRUE)) {
-    return(sub(call, "\\1", item, perl = TRUE))
+
+  tppl <- .model_path(model)
+  if (is.null(tppl)) {
+    cli::cli_inform(c(
+      "i" = "Can't find model {.val {model}}; keeping columns {.field {x_cols}}."
+    ))
+    return(df)
   }
-  paste0("x", i)
+
+  par_names <- .model_return_names(tppl)
+  if (is.null(par_names) || length(par_names) != length(x_cols)) {
+    cli::cli_inform(c(
+      "i" = paste(
+        "Can't name the parameters from the {.code return} statement of",
+        "{.file {tppl}}; keeping columns {.field {x_cols}}."
+      )
+    ))
+    return(df)
+  }
+
+  names(df)[match(x_cols, names(df))] <- par_names
+  df
+}
+
+#' Build an ape::phylo tree from tree parts, using their own node ages
+#' @noRd
+.parts_to_phylo <- function(parts, labels, age = parts$age) {
+  edge <- parts$edge
+  storage.mode(edge) <- "integer"
+  structure(
+    list(
+      edge = edge,
+      edge.length = age[edge[, 1]] - age[edge[, 2]],
+      tip.label = labels,
+      Nnode = length(parts$clades)
+    ),
+    class = "phylo",
+    order = "cladewise"
+  )
+}
+
+#' Read the samples of one MCMC output file, in either output format
+#'
+#' Default format: one summary line holding all samples. Incremental printing:
+#' one sample per line, then an (empty) summary line, which is dropped.
+#' Fields in `exclude` are removed before parsing (see .exclude_fields()).
+#' @noRd
+.read_mcmc_samples <- function(file, exclude = NULL) {
+  lines <- .exclude_fields(.read_tppl_lines(file), exclude)
+  is_summary <- grepl('^\\s*\\{\\s*"samples"\\s*:', lines)
+  sample_lines <- lines[!is_summary]
+
+  if (length(sample_lines) > 0) {
+    # Parse all sample lines at once by wrapping them in one JSON array
+    return(jsonlite::parse_json(
+      paste0("[", paste(sample_lines, collapse = ","), "]")
+    ))
+  }
+  if (any(is_summary)) {
+    return(jsonlite::parse_json(lines[which(is_summary)[1]])$samples)
+  }
+  NULL
 }
 
 #' Read the non-empty lines of TreePPL output files
@@ -685,246 +830,6 @@ tp_summarise_trees <- function(
     perl = TRUE
   )
   lines
-}
-
-#' Read the samples of one MCMC output file, in either output format
-#'
-#' Default format: one summary line holding all samples. Incremental printing:
-#' one sample per line, then an (empty) summary line, which is dropped.
-#' Fields in `exclude` are removed before parsing (see .exclude_fields()).
-#' @noRd
-.read_mcmc_samples <- function(file, exclude = NULL) {
-  lines <- .exclude_fields(.read_tppl_lines(file), exclude)
-  is_summary <- grepl('^\\s*\\{\\s*"samples"\\s*:', lines)
-  sample_lines <- lines[!is_summary]
-
-  if (length(sample_lines) > 0) {
-    # Parse all sample lines at once by wrapping them in one JSON array
-    return(jsonlite::parse_json(
-      paste0("[", paste(sample_lines, collapse = ","), "]")
-    ))
-  }
-  if (any(is_summary)) {
-    return(jsonlite::parse_json(lines[which(is_summary)[1]])$samples)
-  }
-  NULL
-}
-
-#' Turn parsed samples into a data frame of columns
-#'
-#' `samples` is a list as returned by jsonlite::parse_json(), one element per
-#' sample. Simplifying it here is much faster than letting jsonlite do it.
-#' Each sample is either a number (one parameter), an array of numbers
-#' (several unnamed parameters: x1, x2, ...) or a record whose fields are under
-#' `__data__` (named parameters). Vectors of numbers are spread into one
-#' column per element (see .expand_vector_columns()); other values that are
-#' not single numbers (trees, records) become list-columns.
-#' @noRd
-.samples_to_df <- function(samples) {
-  first <- samples[[1]]
-
-  if (is.list(first) && !is.null(first[["__data__"]])) {
-    fields <- names(first[["__data__"]])
-    cols <- lapply(fields, function(field) {
-      lapply(samples, function(s) s[["__data__"]][[field]])
-    })
-    names(cols) <- fields
-  } else if (is.list(first) && is.null(names(first))) {
-    n_par <- length(first)
-    lengths_ok <- all(lengths(samples) == n_par)
-    flat <- unlist(samples, use.names = FALSE)
-    if (lengths_ok && length(flat) == n_par * length(samples)) {
-      # every sample is an array of n_par scalars: fill a matrix by row
-      mat <- matrix(flat, ncol = n_par, byrow = TRUE)
-      cols <- lapply(seq_len(n_par), function(j) mat[, j])
-    } else {
-      cols <- lapply(seq_len(n_par), function(j) lapply(samples, `[[`, j))
-    }
-    names(cols) <- paste0("x", seq_len(n_par))
-  } else {
-    cols <- list(x1 = samples)
-  }
-
-  cols <- .expand_vector_columns(lapply(cols, .simplify_column))
-  structure(cols, class = "data.frame", row.names = c(NA, -length(samples)))
-}
-
-#' Turn a list of single values into a numeric vector; keep anything else
-#'
-#' `"nan"`, `"inf"` and `"-inf"` strings (see .read_tppl_lines()) become
-#' `NaN`, `Inf` and `-Inf`.
-#' @noRd
-.simplify_column <- function(col) {
-  if (!is.list(col)) {
-    return(if (is.character(col)) .as_num(col) else col)
-  }
-  if (all(lengths(col) == 1L) && !any(vapply(col, is.list, logical(1)))) {
-    values <- unlist(col, use.names = FALSE)
-    return(if (is.character(values)) .as_num(values) else values)
-  }
-  col
-}
-
-#' Spread list-columns of numeric vectors into one column per element
-#'
-#' A list-column whose values are all vectors of numbers of the same length k
-#' (k >= 2) becomes k numeric columns, `<name>_1`, ..., `<name>_<k>`, in the
-#' same place. Columns holding trees, records or vectors of different
-#' lengths are kept as they are.
-#' @noRd
-.expand_vector_columns <- function(cols) {
-  expanded <- lapply(names(cols), function(name) {
-    col <- cols[[name]]
-    if (!is.list(col)) {
-      return(stats::setNames(list(col), name))
-    }
-    k <- unique(lengths(col))
-    if (length(k) != 1 || k < 2) {
-      return(stats::setNames(list(col), name))
-    }
-    items <- unlist(col, recursive = FALSE, use.names = FALSE)
-    if (any(lengths(items) != 1) || any(vapply(items, is.list, logical(1)))) {
-      return(stats::setNames(list(col), name)) # e.g. trees or records
-    }
-    values <- unlist(items, use.names = FALSE)
-    if (is.character(values)) values <- .as_num(values)
-    mat <- matrix(values, ncol = k, byrow = TRUE)
-    stats::setNames(
-      lapply(seq_len(k), function(j) mat[, j]),
-      paste0(name, "_", seq_len(k))
-    )
-  })
-  unlist(expanded, recursive = FALSE)
-}
-
-#' as.numeric() without warnings ("nan", "-inf" become NaN, -Inf)
-#' @noRd
-.as_num <- function(x) {
-  suppressWarnings(as.numeric(x))
-}
-
-#' Bind lists of equal-named columns into one tibble
-#'
-#' Faster than rbind() on many data frames: each column is combined once.
-#' @noRd
-.bind_columns <- function(parts) {
-  cols <- names(parts[[1]])
-  out <- lapply(cols, function(col) {
-    pieces <- lapply(parts, `[[`, col)
-    if (all(vapply(pieces, is.atomic, logical(1)))) {
-      unlist(pieces, use.names = FALSE)
-    } else {
-      do.call(c, lapply(pieces, as.list))
-    }
-  })
-  names(out) <- cols
-  tibble::as_tibble(out)
-}
-
-#' Check the `samples`, `random` and `burnin` arguments of
-#' tp_summarise_trees()
-#' @noRd
-.check_summary_args <- function(samples, random, burnin,
-                                call = parent.frame()) {
-  is_count <- is.numeric(samples) && length(samples) == 1 &&
-    isTRUE(samples >= 1 && samples == round(samples))
-  if (!is_count) {
-    cli::cli_abort(
-      "{.arg samples} must be a single positive whole number.",
-      call = call
-    )
-  }
-  if (!isTRUE(random) && !isFALSE(random)) {
-    cli::cli_abort(
-      "{.arg random} must be {.code TRUE} or {.code FALSE}.",
-      call = call
-    )
-  }
-  is_burnin <- is.numeric(burnin) && length(burnin) == 1 &&
-    isTRUE(burnin >= 0) && (burnin < 1 || burnin == round(burnin))
-  if (!is_burnin) {
-    cli::cli_abort(c(
-      "{.arg burnin} must be a fraction in [0, 1) or a whole number of iterations.",
-      "x" = "You supplied {.val {burnin}}."
-    ), call = call)
-  }
-}
-
-#' Tip labels for the trees: `tip_labels`, or "1", "2", ... (the tip index)
-#' @noRd
-.tip_labels <- function(parts, tip_labels, call = parent.frame()) {
-  n_tips <- unique(vapply(parts, `[[`, integer(1), "n_tips"))
-  if (length(n_tips) != 1) {
-    cli::cli_abort(
-      "The sampled trees don't all have the same number of tips.",
-      call = call
-    )
-  }
-  if (is.null(tip_labels)) {
-    return(as.character(seq_len(n_tips)))
-  }
-  if (length(tip_labels) != n_tips) {
-    cli::cli_abort(c(
-      "{.arg tip_labels} must have one name per tip.",
-      "x" = paste(
-        "The trees have {n_tips} tips;",
-        "{.arg tip_labels} has {length(tip_labels)}."
-      )
-    ), call = call)
-  }
-  as.character(tip_labels)
-}
-
-#' Score every sampled tree and rank the distinct topologies
-#'
-#' MAP score: posterior probability of the tree's topology. MCC score: product
-#' of the posterior probabilities of the tree's clades.
-#'
-#' @return A list with `score` (one per tree), `topology` (one key per tree),
-#'   `clade_prob` (posterior probability of every clade, by key) and
-#'   `ranked` (one tree per distinct topology, best first; ties broken by
-#'   the topology's posterior probability).
-#' @noRd
-.score_trees <- function(parts, weight, method) {
-  clade_keys <- lapply(parts, `[[`, "clades")
-  clade_tree <- rep(seq_along(parts), lengths(clade_keys))
-  clade_prob <- tapply(
-    weight[clade_tree], unlist(clade_keys, use.names = FALSE), sum
-  )
-
-  topology <- vapply(parts, `[[`, character(1), "topology")
-  topo_prob <- tapply(weight, topology, sum)
-
-  score <- if (method == "MAP") {
-    unname(topo_prob[topology])
-  } else {
-    vapply(clade_keys, function(k) prod(clade_prob[k]), numeric(1))
-  }
-
-  ranked <- which(!duplicated(topology))
-  ranked <- ranked[order(-score[ranked], -topo_prob[topology[ranked]])]
-
-  list(
-    score = score,
-    topology = topology,
-    ranked = ranked,
-    clade_prob = clade_prob
-  )
-}
-
-#' The `samples` distinct topologies ranked right below the summary tree
-#'
-#' `ranked[1]` is the summary tree itself, so it is skipped.
-#' @noRd
-.top_topologies <- function(ranked, samples) {
-  below <- ranked[-1]
-  if (samples > length(below)) {
-    n <- length(below)
-    cli::cli_inform(c(
-      "i" = "Only {n} other distinct topolog{?y/ies} sampled; returning all of them."
-    ))
-  }
-  utils::head(below, samples)
 }
 
 #' Read the sampled trees and their log weights from TreePPL output
@@ -1018,6 +923,116 @@ tp_summarise_trees <- function(
   list(trees = out_trees, log_weight = out_lw[keep])
 }
 
+#' The expressions of all `return` statements in a (function-free) body
+#' @noRd
+.return_expressions <- function(body) {
+  hits <- gregexpr("\\breturn\\b", body, perl = TRUE)[[1]]
+  if (hits[1] == -1) {
+    return(character(0))
+  }
+  vapply(hits, function(at) {
+    rest <- strsplit(substring(body, at + 6), "")[[1]]
+    # the expression runs to the first ";" outside brackets
+    depth <- cumsum(rest %in% c("(", "[", "{")) -
+      cumsum(rest %in% c(")", "]", "}"))
+    end <- which(rest == ";" & depth == 0)[1]
+    if (is.na(end)) end <- length(rest) + 1
+    trimws(paste(rest[seq_len(end - 1)], collapse = ""))
+  }, character(1))
+}
+
+#' Turn parsed samples into a data frame of columns
+#'
+#' `samples` is a list as returned by jsonlite::parse_json(), one element per
+#' sample. Simplifying it here is much faster than letting jsonlite do it.
+#' Each sample is either a number (one parameter), an array of numbers
+#' (several unnamed parameters: x1, x2, ...) or a record whose fields are under
+#' `__data__` (named parameters). Vectors of numbers are spread into one
+#' column per element (see .expand_vector_columns()); other values that are
+#' not single numbers (trees, records) become list-columns.
+#' @noRd
+.samples_to_df <- function(samples) {
+  first <- samples[[1]]
+
+  if (is.list(first) && !is.null(first[["__data__"]])) {
+    fields <- names(first[["__data__"]])
+    cols <- lapply(fields, function(field) {
+      lapply(samples, function(s) s[["__data__"]][[field]])
+    })
+    names(cols) <- fields
+  } else if (is.list(first) && is.null(names(first))) {
+    n_par <- length(first)
+    lengths_ok <- all(lengths(samples) == n_par)
+    flat <- unlist(samples, use.names = FALSE)
+    if (lengths_ok && length(flat) == n_par * length(samples)) {
+      # every sample is an array of n_par scalars: fill a matrix by row
+      mat <- matrix(flat, ncol = n_par, byrow = TRUE)
+      cols <- lapply(seq_len(n_par), function(j) mat[, j])
+    } else {
+      cols <- lapply(seq_len(n_par), function(j) lapply(samples, `[[`, j))
+    }
+    names(cols) <- paste0("x", seq_len(n_par))
+  } else {
+    cols <- list(x1 = samples)
+  }
+
+  cols <- .expand_vector_columns(lapply(cols, .simplify_column))
+  structure(cols, class = "data.frame", row.names = c(NA, -length(samples)))
+}
+
+#' Score every sampled tree and rank the distinct topologies
+#'
+#' MAP score: posterior probability of the tree's topology. MCC score: product
+#' of the posterior probabilities of the tree's clades.
+#'
+#' @return A list with `score` (one per tree), `topology` (one key per tree),
+#'   `clade_prob` (posterior probability of every clade, by key) and
+#'   `ranked` (one tree per distinct topology, best first; ties broken by
+#'   the topology's posterior probability).
+#' @noRd
+.score_trees <- function(parts, weight, method) {
+  clade_keys <- lapply(parts, `[[`, "clades")
+  clade_tree <- rep(seq_along(parts), lengths(clade_keys))
+  clade_prob <- tapply(
+    weight[clade_tree], unlist(clade_keys, use.names = FALSE), sum
+  )
+
+  topology <- vapply(parts, `[[`, character(1), "topology")
+  topo_prob <- tapply(weight, topology, sum)
+
+  score <- if (method == "MAP") {
+    unname(topo_prob[topology])
+  } else {
+    vapply(clade_keys, function(k) prod(clade_prob[k]), numeric(1))
+  }
+
+  ranked <- which(!duplicated(topology))
+  ranked <- ranked[order(-score[ranked], -topo_prob[topology[ranked]])]
+
+  list(
+    score = score,
+    topology = topology,
+    ranked = ranked,
+    clade_prob = clade_prob
+  )
+}
+
+#' Turn a list of single values into a numeric vector; keep anything else
+#'
+#' `"nan"`, `"inf"` and `"-inf"` strings (see .read_tppl_lines()) become
+#' `NaN`, `Inf` and `-Inf`.
+#' @noRd
+.simplify_column <- function(col) {
+  if (!is.list(col)) {
+    return(if (is.character(col)) .as_num(col) else col)
+  }
+  if (all(lengths(col) == 1L) && !any(vapply(col, is.list, logical(1)))) {
+    values <- unlist(col, use.names = FALSE)
+    return(if (is.character(values)) .as_num(values) else values)
+  }
+  col
+}
+
 #' Remove array-valued fields (except samples and weights) from JSON lines
 #'
 #' A recursive regular expression matches a whole bracketed array, however
@@ -1029,6 +1044,103 @@ tp_summarise_trees <- function(
   arr <- "(\\[(?:[^\\[\\]]++|(?-1))*\\])"
   lines <- gsub(paste0(",\\s*", key, arr), "", lines, perl = TRUE)
   gsub(paste0(key, arr, "\\s*,?"), "", lines, perl = TRUE)
+}
+
+#' Build the summary tree for the topology of tree `i`
+#'
+#' Node ages are the weighted mean or median (`heights`) age of each clade
+#' over the trees in `in_set`; tip ages are the weighted mean. Only the
+#' clades of tree `i` are summarised.
+#'
+#' @return A list with `tree` (ape::phylo, clade probabilities as node
+#'   labels) and `nodes` (tibble: one row per internal node of `tree`).
+#' @noRd
+.summary_phylo <- function(parts, i, in_set, weight, labels, heights,
+                           clade_prob) {
+  target <- parts[[i]]
+  n_tips <- target$n_tips
+  set <- which(in_set & weight > 0)
+  if (length(set) == 0) set <- which(in_set)
+
+  # ages of the target's clades in every tree of the set that has them
+  keys <- unlist(lapply(parts[set], `[[`, "clades"), use.names = FALSE)
+  ages <- unlist(
+    lapply(parts[set], function(p) p$age[-seq_len(p$n_tips)]),
+    use.names = FALSE
+  )
+  w <- rep(weight[set], lengths(lapply(parts[set], `[[`, "clades")))
+  keep <- keys %in% target$clades
+  by_clade <- split(
+    which(keep), factor(keys[keep], levels = target$clades)
+  )
+  stats <- vapply(
+    by_clade, function(j) .age_stats(ages[j], w[j]), numeric(5)
+  )
+
+  tip_ages <- vapply(
+    parts[set], function(p) p$age[seq_len(n_tips)], numeric(n_tips)
+  )
+  tip_ages <- if (is.matrix(tip_ages)) {
+    drop(tip_ages %*% weight[set]) / sum(weight[set])
+  } else {
+    tip_ages
+  }
+
+  posterior <- as.vector(clade_prob[target$clades])
+  node_age <- stats[if (heights == "mean") "mean" else "median", ]
+  tree <- .parts_to_phylo(target, labels, c(tip_ages, unname(node_age)))
+  tree$node.label <- as.character(signif(posterior, 3))
+
+  nodes <- tibble::tibble(
+    node = n_tips + seq_along(target$clades),
+    posterior = posterior,
+    age_mean = unname(stats["mean", ]),
+    age_median = unname(stats["median", ]),
+    age_lower = unname(stats["lower", ]),
+    age_upper = unname(stats["upper", ]),
+    n_trees = as.integer(stats["n", ])
+  )
+  list(tree = tree, nodes = nodes)
+}
+
+#' Tip labels for the trees: `tip_labels`, or "1", "2", ... (the tip index)
+#' @noRd
+.tip_labels <- function(parts, tip_labels, call = parent.frame()) {
+  n_tips <- unique(vapply(parts, `[[`, integer(1), "n_tips"))
+  if (length(n_tips) != 1) {
+    cli::cli_abort(
+      "The sampled trees don't all have the same number of tips.",
+      call = call
+    )
+  }
+  if (is.null(tip_labels)) {
+    return(as.character(seq_len(n_tips)))
+  }
+  if (length(tip_labels) != n_tips) {
+    cli::cli_abort(c(
+      "{.arg tip_labels} must have one name per tip.",
+      "x" = paste(
+        "The trees have {n_tips} tips;",
+        "{.arg tip_labels} has {length(tip_labels)}."
+      )
+    ), call = call)
+  }
+  as.character(tip_labels)
+}
+
+#' The `samples` distinct topologies ranked right below the summary tree
+#'
+#' `ranked[1]` is the summary tree itself, so it is skipped.
+#' @noRd
+.top_topologies <- function(ranked, samples) {
+  below <- ranked[-1]
+  if (samples > length(below)) {
+    n <- length(below)
+    cli::cli_inform(c(
+      "i" = "Only {n} other distinct topolog{?y/ies} sampled; returning all of them."
+    ))
+  }
+  utils::head(below, samples)
 }
 
 #' Take a parsed TreePPL tree apart
@@ -1101,127 +1213,19 @@ tp_summarise_trees <- function(
   )
 }
 
-#' Build an ape::phylo tree from tree parts, using their own node ages
+#' A name for one returned value: the variable, the argument of a one-argument
+#' call, or `x<i>` for anything else
 #' @noRd
-.parts_to_phylo <- function(parts, labels, age = parts$age) {
-  edge <- parts$edge
-  storage.mode(edge) <- "integer"
-  structure(
-    list(
-      edge = edge,
-      edge.length = age[edge[, 1]] - age[edge[, 2]],
-      tip.label = labels,
-      Nnode = length(parts$clades)
-    ),
-    class = "phylo",
-    order = "cladewise"
-  )
-}
+.value_name <- function(item, i) {
+  ident <- "[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*"
+  item <- trimws(item)
 
-#' Build the summary tree for the topology of tree `i`
-#'
-#' Node ages are the weighted mean or median (`heights`) age of each clade
-#' over the trees in `in_set`; tip ages are the weighted mean. Only the
-#' clades of tree `i` are summarised.
-#'
-#' @return A list with `tree` (ape::phylo, clade probabilities as node
-#'   labels) and `nodes` (tibble: one row per internal node of `tree`).
-#' @noRd
-.summary_phylo <- function(parts, i, in_set, weight, labels, heights,
-                           clade_prob) {
-  target <- parts[[i]]
-  n_tips <- target$n_tips
-  set <- which(in_set & weight > 0)
-  if (length(set) == 0) set <- which(in_set)
-
-  # ages of the target's clades in every tree of the set that has them
-  keys <- unlist(lapply(parts[set], `[[`, "clades"), use.names = FALSE)
-  ages <- unlist(
-    lapply(parts[set], function(p) p$age[-seq_len(p$n_tips)]),
-    use.names = FALSE
-  )
-  w <- rep(weight[set], lengths(lapply(parts[set], `[[`, "clades")))
-  keep <- keys %in% target$clades
-  by_clade <- split(
-    which(keep), factor(keys[keep], levels = target$clades)
-  )
-  stats <- vapply(
-    by_clade, function(j) .age_stats(ages[j], w[j]), numeric(5)
-  )
-
-  tip_ages <- vapply(
-    parts[set], function(p) p$age[seq_len(n_tips)], numeric(n_tips)
-  )
-  tip_ages <- if (is.matrix(tip_ages)) {
-    drop(tip_ages %*% weight[set]) / sum(weight[set])
-  } else {
-    tip_ages
+  if (grepl(paste0("^", ident, "$"), item, perl = TRUE)) {
+    return(item)
   }
-
-  posterior <- as.vector(clade_prob[target$clades])
-  node_age <- stats[if (heights == "mean") "mean" else "median", ]
-  tree <- .parts_to_phylo(target, labels, c(tip_ages, unname(node_age)))
-  tree$node.label <- as.character(signif(posterior, 3))
-
-  nodes <- tibble::tibble(
-    node = n_tips + seq_along(target$clades),
-    posterior = posterior,
-    age_mean = unname(stats["mean", ]),
-    age_median = unname(stats["median", ]),
-    age_lower = unname(stats["lower", ]),
-    age_upper = unname(stats["upper", ]),
-    n_trees = as.integer(stats["n", ])
-  )
-  list(tree = tree, nodes = nodes)
-}
-
-#' Weighted mean, median and HPD interval of a set of ages
-#'
-#' The HPD interval is the shortest interval of sorted ages whose weights sum
-#' to at least `level`.
-#' @return A named vector: `mean`, `median`, `lower`, `upper`, `n`.
-#' @noRd
-.age_stats <- function(x, w, level = 0.95) {
-  o <- order(x)
-  x <- x[o]
-  w <- w[o]
-  if (sum(w) <= 0) w <- rep(1, length(w))
-  w <- w / sum(w)
-  cw <- cumsum(w)
-  tol <- 1e-12
-
-  # for each start i, the first end j with weight(x[i..j]) >= level
-  end <- findInterval(cw - w + level - tol, cw, left.open = TRUE) + 1L
-  ok <- end <= length(x)
-  start <- which(ok)
-  best <- start[which.min(x[end[ok]] - x[start])]
-
-  c(
-    mean = sum(w * x),
-    median = x[which(cw >= 0.5 - tol)[1]],
-    lower = x[best],
-    upper = x[end[best]],
-    n = length(x)
-  )
-}
-
-#' Warn when summarised node ages give negative branch lengths
-#'
-#' Can only happen with method = "MCC", where a parent and its child are
-#' averaged over different sets of trees.
-#' @noRd
-.check_branch_lengths <- function(trees, call = parent.frame()) {
-  n_neg <- vapply(trees, function(t) sum(t$edge.length < 0), numeric(1))
-  if (sum(n_neg) == 0) {
-    return(invisible())
+  call <- paste0("^[A-Za-z_][A-Za-z0-9_]*\\s*\\(\\s*(", ident, ")\\s*\\)$")
+  if (grepl(call, item, perl = TRUE)) {
+    return(sub(call, "\\1", item, perl = TRUE))
   }
-  n_trees <- sum(n_neg > 0)
-  cli::cli_warn(c(
-    "{sum(n_neg)} branch{?es} in {n_trees} summary tree{?s} {?has/have} a negative length.",
-    "i" = paste(
-      "A child clade came out older than its parent: the clades involved",
-      "probably have low support (see {.field node_summary})."
-    ),
-    "i" = "Try {.code method = \"MAP\"} or more samples."
-  ), call = call)
+  paste0("x", i)
 }

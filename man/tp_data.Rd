@@ -64,8 +64,8 @@ d <- tp_data(
   model = "crbd",
   data = list(tree = tp_phylo_to_tpPhylo(phy), rho = 0.5)
 )
-d            # prints the summary again
-d$data_path  # path to the JSON file
+d # prints the summary again
+d$data_path # path to the JSON file
 
 # Write to a chosen file, without the check or the summary
 d <- tp_data(

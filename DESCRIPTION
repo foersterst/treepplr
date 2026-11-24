@@ -63,3 +63,4 @@ Remotes:
     bioc::ggtree,
     bioc::treeio
 Config/roxygen2/version: 8.1.1
+LazyData: true

@@ -69,7 +69,7 @@
 #' samples <- tp_parse_smc("out.json", model = "clads2")
 #' }
 tp_parse_smc <- function(json_path, model = NULL, exclude = NULL) {
-  lines <- .exclude_fields(.read_tppl_lines(json_path), exclude)
+  lines <- .read_tppl_lines(json_path, exclude)
 
   sweeps <- lapply(seq_along(lines), function(i) {
     sweep <- jsonlite::parse_json(lines[i])
@@ -521,6 +521,32 @@ tp_summarise_trees <- function(
   }
 }
 
+#' Clean one batch of TreePPL output lines
+#'
+#' Drops empty lines, removes the fields in `exclude`, applies `transform`,
+#' and rewrites `{"__float__": ...}` values as strings.
+#' @noRd
+.clean_tppl_lines <- function(lines, exclude, transform) {
+  # drop empty lines; only short lines can be whitespace-only, so only those
+  # are checked with a regular expression (fast on very long lines)
+  lines <- lines[nzchar(lines)]
+  short <- nchar(lines, type = "bytes") < 100
+  lines <- lines[!(short & !grepl("\\S", lines))]
+
+  # remove unneeded fields first: later steps then work on less text
+  lines <- .exclude_fields(lines, exclude)
+  if (!is.null(transform)) lines <- transform(lines)
+
+  # rewrite {"__float__": ...} only in lines that contain it
+  has_float <- grepl("__float__", lines, fixed = TRUE)
+  lines[has_float] <- gsub(
+    '\\{\\s*"__float__"\\s*:\\s*"([^"]*)"\\s*\\}', '"\\1"',
+    lines[has_float],
+    perl = TRUE
+  )
+  lines
+}
+
 #' Remove the bodies of functions defined inside a model body
 #'
 #' Anonymous functions (`function(x: Int) => Real { ... }`) have their own
@@ -786,7 +812,7 @@ tp_summarise_trees <- function(
 #' Fields in `exclude` are removed before parsing (see .exclude_fields()).
 #' @noRd
 .read_mcmc_samples <- function(file, exclude = NULL) {
-  lines <- .exclude_fields(.read_tppl_lines(file), exclude)
+  lines <- .read_tppl_lines(file, exclude)
   is_summary <- grepl('^\\s*\\{\\s*"samples"\\s*:', lines)
   sample_lines <- lines[!is_summary]
 
@@ -804,32 +830,42 @@ tp_summarise_trees <- function(
 
 #' Read the non-empty lines of TreePPL output files
 #'
+#' Files are read `chunk_size` lines at a time, and each batch is cleaned
+#' (see .clean_tppl_lines()) before the next is read. Fields in `exclude`
+#' (e.g. the sampled trees) are removed batch by batch, so memory use depends
+#' on the size of the lines, not of the files: with incremental printing,
+#' where each line is one sample, very large outputs can be read.
+#'
 #' TreePPL writes NaN and infinities as `{"__float__": "-inf"}`. They are
 #' turned into strings (`"-inf"`, `"inf"`, `"nan"`) that `as.numeric()`
 #' understands, so that samples and weights simplify to plain vectors.
+#'
+#' @param json_path Path(s) to TreePPL output files.
+#' @param exclude Fields to remove before parsing (see .exclude_fields()).
+#' @param transform Optional function applied to each batch of lines after
+#'   `exclude` (e.g. .strip_tree_arrays()).
+#' @param chunk_size Number of lines read at a time.
+#' @return A character vector of cleaned lines.
 #' @noRd
-.read_tppl_lines <- function(json_path) {
+.read_tppl_lines <- function(json_path, exclude = NULL, transform = NULL,
+                             chunk_size = 10, call = parent.frame()) {
   missing <- json_path[!file.exists(json_path)]
   if (length(missing) > 0) {
-    cli::cli_abort("Can't find {.file {missing}}.", call = parent.frame())
+    cli::cli_abort("Can't find {.file {missing}}.", call = call)
   }
+  .exclude_fields(character(0), exclude, call = call) # check `exclude` once
 
-  lines <- unlist(lapply(json_path, readLines, warn = FALSE), use.names = FALSE)
-  # drop empty lines; only short lines can be whitespace-only, so only those
-  # are checked with a regular expression (fast on very long lines)
-  lines <- lines[nzchar(lines)]
-  short <- nchar(lines, type = "bytes") < 100
-  blank <- short & !grepl("\\S", lines)
-  lines <- lines[!blank]
-
-  # rewrite {"__float__": ...} only in lines that contain it
-  has_float <- grepl("__float__", lines, fixed = TRUE)
-  lines[has_float] <- gsub(
-    '\\{\\s*"__float__"\\s*:\\s*"([^"]*)"\\s*\\}', '"\\1"',
-    lines[has_float],
-    perl = TRUE
-  )
-  lines
+  kept <- list()
+  for (path in json_path) {
+    con <- file(path, open = "r")
+    repeat {
+      chunk <- readLines(con, n = chunk_size, warn = FALSE)
+      if (length(chunk) == 0) break
+      kept[[length(kept) + 1]] <- .clean_tppl_lines(chunk, exclude, transform)
+    }
+    close(con)
+  }
+  unlist(kept, use.names = FALSE)
 }
 
 #' Read the sampled trees and their log weights from TreePPL output
@@ -850,7 +886,7 @@ tp_summarise_trees <- function(
   is_mcmc <- logical(0)
 
   for (file in trees) {
-    lines <- .strip_tree_arrays(.read_tppl_lines(file))
+    lines <- .read_tppl_lines(file, transform = .strip_tree_arrays)
     is_summary <- grepl('^\\s*\\{\\s*"samples"\\s*:', lines)
     file_trees <- list()
     file_lw <- numeric(0)

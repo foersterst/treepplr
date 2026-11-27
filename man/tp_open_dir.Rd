@@ -2,16 +2,33 @@
 % Please edit documentation in R/utils.R
 \name{tp_open_dir}
 \alias{tp_open_dir}
-\title{Open a directory in the system's file browser}
+\title{Open a treepplr directory in the system's file browser}
 \usage{
-tp_open_dir(dir = tp_tempdir())
+tp_open_dir(dir = c("temp", "model_lib", "install_dir"))
 }
 \arguments{
-\item{dir}{Path to a directory. Defaults to \code{\link[=tp_tempdir]{tp_tempdir()}}.}
+\item{dir}{Which directory to open:
+\itemize{
+\item \code{"temp"} (default): the session's temporary directory, \code{\link[=tp_tempdir]{tp_tempdir()}},
+where \code{\link[=tp_run]{tp_run()}} writes its output by default;
+\item \code{"model_lib"}: the folder of the TreePPL model library (see
+\code{\link[=tp_model_library]{tp_model_library()}});
+\item \code{"install_dir"}: where treepplr keeps the downloaded TreePPL release.
+}}
 }
 \value{
-\code{dir}, invisibly.
+The path of the directory, invisibly.
 }
 \description{
-Open a directory in the system's file browser
+\code{tp_open_dir()} opens one of the directories that treepplr uses in the
+system's file browser (Finder on macOS, File Explorer on Windows).
+}
+\examples{
+\dontrun{
+tp_open_dir()
+tp_open_dir("model_lib")
+}
+}
+\seealso{
+\code{\link[=tp_tempdir]{tp_tempdir()}}, \code{\link[=tp_model_library]{tp_model_library()}}.
 }

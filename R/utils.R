@@ -410,12 +410,55 @@ tp_list <- function(...) {
   invisible(result)
 }
 
-#' Open a directory in the system's file browser
+#' Open a treepplr directory in the system's file browser
 #'
-#' @param dir Path to a directory. Defaults to [tp_tempdir()].
-#' @return `dir`, invisibly.
+#' @description
+#' `tp_open_dir()` opens one of the directories that treepplr uses in the
+#' system's file browser (Finder on macOS, File Explorer on Windows).
+#'
+#' @param dir Which directory to open:
+#'   * `"temp"` (default): the session's temporary directory, [tp_tempdir()],
+#'     where [tp_run()] writes its output by default;
+#'   * `"model_lib"`: the folder of the TreePPL model library (see
+#'     [tp_model_library()]);
+#'   * `"install_dir"`: where treepplr keeps the downloaded TreePPL release.
+#'
+#' @return The path of the directory, invisibly.
+#'
+#' @seealso [tp_tempdir()], [tp_model_library()].
+#'
 #' @export
-tp_open_dir <- function(dir = tp_tempdir()) {
+#'
+#' @examples
+#' \dontrun{
+#' tp_open_dir()
+#' tp_open_dir("model_lib")
+#' }
+tp_open_dir <- function(dir = c("temp", "model_lib", "install_dir")) {
+  dirs <- c("temp", "model_lib", "install_dir")
+
+  if (identical(dir, dirs)) dir <- "temp"
+
+  if (!is.character(dir) || length(dir) != 1 || !dir %in% dirs) {
+    cli::cli_abort(c(
+      "{.arg dir} must be one of {.or {.val {dirs}}}.",
+      "x" = "You supplied {.val {dir}}."
+    ))
+  }
+
+  if (dir == "model_lib") {
+    dir <- .find(type = "model")
+    dir <- sub("(.*/models)/.*$", "\\1", dir[[1]])
+  }
+
+  if (dir == "install_dir") {
+    dir <- .install_dir()
+  }
+
+  if (dir == "temp") {
+    dir <- tp_tempdir()
+  }
+
   utils::browseURL(normalizePath(dir))
   invisible(dir)
 }
